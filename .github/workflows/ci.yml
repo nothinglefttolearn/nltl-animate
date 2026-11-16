@@ -31,6 +31,20 @@ jobs:
           restore-keys: go-${{ runner.os }}-
       - run: mise run ci
 
+  integration:
+    # Renders a short clip of every style with a real ffmpeg (Ubuntu's is
+    # 6.x; the grid style needs >= 5.1).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: jdx/mise-action@v3
+        with:
+          install_args: go
+          cache: true
+      - run: mise run test:integration
+
   build:
     # Cross-compile check: the tool is used on macOS, so make sure it builds there too.
     runs-on: ubuntu-latest

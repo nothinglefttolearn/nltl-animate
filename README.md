@@ -1,11 +1,11 @@
 # nltl-clip
 
-A CLI tool for generating animated video clips from a music file and a still image. Built around ffmpeg with BPM-synced visuals and output profiles for social media platforms.
+A CLI tool for generating animated video clips from a music file and one or more images. Built around ffmpeg with BPM-synced visuals and output profiles for social media platforms.
 
 ## Requirements
 
 - [Go](https://go.dev) 1.27.4+ (or [mise](https://mise.jdx.dev): `mise install`)
-- [ffmpeg](https://ffmpeg.org) with ffprobe in your PATH
+- [ffmpeg](https://ffmpeg.org) with ffprobe in your PATH (5.1 or newer for the `grid` style)
 
 ## Install
 
@@ -24,7 +24,11 @@ go build -o nltl-clip ./cmd/nltl-clip/
 ## Usage
 
 ```
-nltl-clip [audio] [image] [flags]
+nltl-clip [audio] [image] [flags]                  # single image (default style)
+nltl-clip cycle <audio> <image> <image>... [flags]
+nltl-clip grid  <audio> <image> [flags]
+nltl-clip train <audio> <image> [flags]
+nltl-clip                                          # interactive: asks for everything
 ```
 
 ```bash
@@ -41,7 +45,56 @@ nltl-clip --profile youtube --preset dark --bpm 138 demo.wav cover.jpg
 nltl-clip --config nltl.yaml --preset my-preset --bpm 138 demo.wav cover.jpg
 ```
 
-Output files are saved alongside the audio file, named `{trackname}_{profile}.mp4`.
+Output files are saved alongside the audio file, named `{trackname}_{profile}.mp4`; other styles add the style, e.g. `demo_youtube_grid4.mp4` or `demo_instagram_story_train.mp4`.
+
+## Styles
+
+Every style gets the preset's motion (zoom breathing, jitter) and grade (blur, brightness pulse, contrast, saturation, vignette, grain), so `--preset`, `--bpm` and `--still` work everywhere. Run `nltl-clip <style> --help` for each style's flags.
+
+### single
+
+One image, gently moving. The default when you pass `audio image`.
+
+### cycle
+
+Jumps to a random image on every frame (never the same one twice in a row), so a folder of images works as loose, jittery animation.
+
+```bash
+nltl-clip cycle --bpm 140 demo.wav frames/*.png
+nltl-clip cycle --hold 3 demo.wav a.jpg b.jpg c.jpg           # change every 3 frames
+nltl-clip cycle --bpm 140 --hold-beats 0.25 demo.wav frames/*.png  # change every 16th note
+```
+
+The sequence is random but reproducible: each render prints its `--seed`, and passing the same seed gives the same clip. Images are cover-cropped to the output size; each one uses about `width × height × 4` bytes of memory (8 MB at 1080×1920).
+
+### grid
+
+The image tiled N×N, every tile moving in sync. The vignette and grain are applied once over the whole frame.
+
+```bash
+nltl-clip grid --n 4 demo.wav cover.jpg
+```
+
+### train
+
+A fake 3D scene: copies of the image come out of the distance and pass on your left, like standing beside a track watching a train go by. Use a PNG with transparency (a logo, a cut-out) so the copies behind show through. Distant copies fade into the background colour.
+
+```bash
+nltl-clip train --bpm 138 demo.wav logo.png                 # one copy passes per beat
+nltl-clip train --bpm 138 --beats 0.5 --vanish 0.7 --bg '#101820' demo.wav logo.png
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--copies` | `24` | copies on the track at once |
+| `--spacing` | `1` | depth gap between copies, in copy heights (bigger = more separated) |
+| `--speed` | `1.5` | copies passing per second, without `--bpm` |
+| `--beats` | `1` | beats per passing copy, with `--bpm` |
+| `--vanish` | `0.5` | where the track vanishes across the frame; `0.6`–`0.75` fills more of it |
+| `--offset` | `0.25` | gap between the track and you, in copy widths |
+| `--fov` | `60` | field of view in degrees (wider = stronger perspective) |
+| `--fog` | `0.6` | how much distant copies fade into the background, 0–1 |
+| `--bg` | `#000000` | background colour |
 
 ## Flags
 
@@ -52,6 +105,8 @@ Output files are saved alongside the audio file, named `{trackname}_{profile}.mp
 | `--bpm` | `0` | Track BPM for beat-synced animation (0 = time-based) |
 | `--preview` | `false` | Render 10s at low quality to check the look |
 | `--output-dir`, `-o` | same as audio | Where to write the output file |
+| `--still` | `false` | Disable zoom and jitter (brightness pulse stays) |
+| `--verbose`, `-v` | `false` | Show ffmpeg's output while rendering |
 | `--config`, `-c` | — | YAML file with custom presets |
 | `--version` | — | Print the version and exit |
 

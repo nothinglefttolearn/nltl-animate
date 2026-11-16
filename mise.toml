@@ -30,6 +30,14 @@ description = "Run tests with the race detector and coverage"
 env = { CGO_ENABLED = "1" }
 run = "go test -race -shuffle=on -covermode=atomic -coverprofile=coverage.out ./..."
 
+[tasks."test:integration"]
+description = "Render a short clip of every style with the real ffmpeg on PATH"
+run = "go test -tags integration -run Integration -count=1 -v ./cmd/..."
+
+[tasks.bench]
+description = "Run benchmarks"
+run = "go test -run '^$' -bench . ./..."
+
 [tasks.vuln]
 description = "Scan dependencies and stdlib for known vulnerabilities"
 run = "govulncheck ./..."

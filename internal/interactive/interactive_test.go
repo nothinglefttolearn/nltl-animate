@@ -37,3 +37,30 @@ func TestValidateBPM(t *testing.T) {
 		}
 	}
 }
+
+func TestStyleOptionsHideCycleWithOneImage(t *testing.T) {
+	values := func(n int) []string {
+		var v []string
+		for _, o := range styleOptions(n) {
+			v = append(v, o.Value)
+		}
+		return v
+	}
+	if got := values(1); slices.Contains(got, StyleCycle) || len(got) != 3 {
+		t.Errorf("1 image: %v", got)
+	}
+	if got := values(2); !slices.Equal(got, []string{StyleSingle, StyleCycle, StyleGrid, StyleTrain}) {
+		t.Errorf("2 images: %v", got)
+	}
+}
+
+func TestValidateCycleImagesAndGridN(t *testing.T) {
+	if validateCycleImages([]string{"a"}) == nil || validateCycleImages([]string{"a", "b"}) != nil {
+		t.Error("cycle needs at least 2 images")
+	}
+	for in, ok := range map[string]bool{"1": true, "12": true, "0": false, "13": false, "x": false, "": false} {
+		if (validateGridN(in) == nil) != ok {
+			t.Errorf("validateGridN(%q) ok=%v", in, !ok)
+		}
+	}
+}

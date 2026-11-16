@@ -13,6 +13,7 @@ import (
 
 	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
 	"github.com/nothinglefttolearn/nltl-clip/internal/profile"
+	"github.com/nothinglefttolearn/nltl-clip/internal/style"
 )
 
 var audioExts = map[string]bool{
@@ -20,17 +21,27 @@ var audioExts = map[string]bool{
 }
 
 var imageExts = map[string]bool{
-	".jpg": true, ".jpeg": true, ".png": true,
+	".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true,
 }
+
+// Style names match the CLI subcommands ("single" is the root command).
+const (
+	StyleSingle = "single"
+	StyleCycle  = "cycle"
+	StyleGrid   = "grid"
+	StyleTrain  = "train"
+)
 
 // Choices holds what the user picked in the form.
 type Choices struct {
+	Style       string
 	AudioPath   string
-	ImagePath   string
+	ImagePaths  []string
 	ProfileName string
 	PresetName  string
 	BPM         int
 	Still       bool
+	GridN       int
 }
 
 // Defaults pre-fills the form (typically from command-line flags) and supplies
@@ -40,6 +51,7 @@ type Defaults struct {
 	PresetName    string
 	BPM           int
 	Still         bool
+	GridN         int
 	CustomPresets []preset.Preset
 }
 
@@ -63,8 +75,11 @@ func Run(d Defaults) (*Choices, error) {
 	presetOpts, presetNames := presetOptions(d.CustomPresets)
 
 	var (
+		styleName   = StyleSingle
 		audioPath   = audioFiles[0]
 		imagePath   = imageFiles[0]
+		cyclePaths  []string
+		gridStr     = strconv.Itoa(max(1, d.GridN))
 		profileName = orFirst(d.ProfileName, profile.Names())
 		presetName  = orFirst(d.PresetName, presetNames)
 		bpmStr      = ""
@@ -73,18 +88,41 @@ func Run(d Defaults) (*Choices, error) {
 	if d.BPM > 0 {
 		bpmStr = strconv.Itoa(d.BPM)
 	}
+	is := func(s string) func() bool { return func() bool { return styleName == s } }
+	isNot := func(s string) func() bool { return func() bool { return styleName != s } }
 
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
+				Title("Style").
+				Options(styleOptions(len(imageFiles))...).
+				Value(&styleName),
+			huh.NewSelect[string]().
 				Title("Audio file").
 				Options(fileOptions(audioFiles)...).
 				Value(&audioPath),
+		),
+		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Image file").
 				Options(fileOptions(imageFiles)...).
 				Value(&imagePath),
-		),
+		).WithHideFunc(is(StyleCycle)),
+		huh.NewGroup(
+			huh.NewMultiSelect[string]().
+				Title("Images to cycle through").
+				Description("space to toggle, at least 2").
+				Options(fileOptions(imageFiles)...).
+				Validate(validateCycleImages).
+				Value(&cyclePaths),
+		).WithHideFunc(isNot(StyleCycle)),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Grid size").
+				Description(fmt.Sprintf("tiles per side, 1–%d", style.MaxGrid)).
+				Validate(validateGridN).
+				Value(&gridStr),
+		).WithHideFunc(isNot(StyleGrid)),
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Profile").
@@ -120,15 +158,53 @@ func Run(d Defaults) (*Choices, error) {
 	if bpmStr != "" {
 		bpm, _ = strconv.Atoi(bpmStr)
 	}
+	gridN, _ := strconv.Atoi(gridStr)
+
+	images := []string{imagePath}
+	if styleName == StyleCycle {
+		images = cyclePaths
+	}
 
 	return &Choices{
+		Style:       styleName,
 		AudioPath:   audioPath,
-		ImagePath:   imagePath,
+		ImagePaths:  images,
 		ProfileName: profileName,
 		PresetName:  presetName,
 		BPM:         bpm,
 		Still:       still,
+		GridN:       gridN,
 	}, nil
+}
+
+// styleOptions lists the styles; cycle is offered only when there are at
+// least two images to cycle through.
+func styleOptions(nImages int) []huh.Option[string] {
+	opts := []huh.Option[string]{
+		huh.NewOption("single   one image, gently moving", StyleSingle),
+	}
+	if nImages >= 2 {
+		opts = append(opts, huh.NewOption("cycle    jump between images at random", StyleCycle))
+	}
+	return append(opts,
+		huh.NewOption("grid     the image tiled N×N", StyleGrid),
+		huh.NewOption("train    copies fly past on the left", StyleTrain),
+	)
+}
+
+func validateCycleImages(paths []string) error {
+	if len(paths) < 2 {
+		return errors.New("pick at least 2 images")
+	}
+	return nil
+}
+
+func validateGridN(s string) error {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > style.MaxGrid {
+		return fmt.Errorf("enter a number from 1 to %d", style.MaxGrid)
+	}
+	return nil
 }
 
 func scanFiles(exts map[string]bool) ([]string, error) {

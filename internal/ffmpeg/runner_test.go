@@ -2,10 +2,12 @@ package ffmpeg
 
 import (
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -64,7 +66,7 @@ func TestRenderSuccessAndArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(strings.Fields(string(raw)), " ")
-	for _, want := range []string{"-loglevel error", "-i i.jpg", "-i a.wav", "-vf null", "-t 10.000", "-preset ultrafast"} {
+	for _, want := range []string{"-loglevel error", "-i i.jpg", "-i a.wav", "-filter_complex [0:v]null[v]", "-map [v]", "-map 1:a", "-loop 1", "-t 10.000", "-preset ultrafast"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing %q: %s", want, args)
 		}
@@ -72,6 +74,77 @@ func TestRenderSuccessAndArgs(t *testing.T) {
 	if !strings.HasSuffix(args, "o.mp4") {
 		t.Errorf("output path should be last: %s", args)
 	}
+}
+
+// solidFrames is a FrameSource of identical frames.
+type solidFrames struct {
+	w, h int
+	fail error
+}
+
+func (s solidFrames) Size() (int, int) { return s.w, s.h }
+
+func (s solidFrames) WriteFrames(w io.Writer, n int) error {
+	if s.fail != nil {
+		return s.fail
+	}
+	frame := make([]byte, s.w*s.h*4)
+	for range n {
+		if _, err := w.Write(frame); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestRenderFramesPipesEveryFrame(t *testing.T) {
+	dir := t.TempDir()
+	argsFile, countFile := filepath.Join(dir, "args"), filepath.Join(dir, "count")
+	fakeTool(t, "ffmpeg", `printf '%s\n' "$@" > `+argsFile+"\nwc -c > "+countFile+"\n")
+
+	err := Render(Options{Frames: solidFrames{w: 8, h: 6}, AudioPath: "a.wav", OutputPath: "o.mp4", Filter: "null", Duration: 2})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	raw, _ := os.ReadFile(countFile)
+	if got, want := strings.TrimSpace(string(raw)), strconv.Itoa(60*8*6*4); got != want {
+		t.Errorf("ffmpeg read %s bytes, want %s (60 frames of 8x6 RGBA)", got, want)
+	}
+	rawArgs, _ := os.ReadFile(argsFile)
+	args := strings.Join(strings.Fields(string(rawArgs)), " ")
+	for _, want := range []string{"-f rawvideo -pixel_format rgba -video_size 8x6 -framerate 30 -i pipe:0", "-crf 18"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q: %s", want, args)
+		}
+	}
+	if strings.Contains(args, "stillimage") || strings.Contains(args, "-loop") {
+		t.Errorf("still-image options used for a frame stream: %s", args)
+	}
+}
+
+func TestRenderFramesFfmpegErrorWins(t *testing.T) {
+	// ffmpeg dies without reading stdin; the writer then hits a broken pipe.
+	fakeTool(t, "ffmpeg", "echo 'Invalid frame size' >&2\nexit 1\n")
+	err := Render(Options{Frames: solidFrames{w: 64, h: 64}, OutputPath: "o.mp4", Duration: 60})
+	assertErrContains(t, err, "ffmpeg failed", "exit status 1", "Invalid frame size")
+	if strings.Contains(err.Error(), "broken pipe") || strings.Contains(err.Error(), "writing frames") {
+		t.Errorf("write error leaked into message: %v", err)
+	}
+}
+
+func TestRenderFramesEarlySuccessfulExit(t *testing.T) {
+	// ffmpeg reads a little and exits 0, as it does once -t is reached.
+	fakeTool(t, "ffmpeg", "head -c 100 > /dev/null\nexit 0\n")
+	if err := Render(Options{Frames: solidFrames{w: 64, h: 64}, OutputPath: "o.mp4", Duration: 60}); err != nil {
+		t.Errorf("Render: %v", err)
+	}
+}
+
+func TestRenderFramesSourceError(t *testing.T) {
+	fakeTool(t, "ffmpeg", "cat > /dev/null\n")
+	err := Render(Options{Frames: solidFrames{w: 8, h: 8, fail: errors.New("decode boom")}, OutputPath: "o.mp4", Duration: 1})
+	assertErrContains(t, err, "writing frames", "decode boom")
 }
 
 func TestRenderFailureIncludesStderr(t *testing.T) {

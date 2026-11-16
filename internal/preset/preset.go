@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/nothinglefttolearn/nltl-clip/internal/video"
 )
 
 type Preset struct {
@@ -117,39 +119,55 @@ func (p Preset) Validate() error {
 	return fmt.Errorf("preset %q:\n  - %s", p.Name, strings.Join(problems, "\n  - "))
 }
 
+// BuildFilter returns the full single-image filter chain: motion then grade.
 func (p Preset) BuildFilter(width, height, bpm int) string {
-	var zoomExpr, jitterXExpr, jitterYExpr, brightnessExpr string
+	return p.MotionFilter(width, height, bpm) + "," + p.GradeFilter(bpm)
+}
+
+// MotionFilter scales and crops the input to width x height and applies the
+// zoom "breathing" and jitter. It expects one input frame per output frame.
+func (p Preset) MotionFilter(width, height, bpm int) string {
+	var zoomExpr, jitterXExpr, jitterYExpr string
 
 	if bpm > 0 {
-		// BPM-synced: period in frames at 30fps
-		zoomFramePeriod := p.ZoomBeats * 60.0 / float64(bpm) * 30.0
+		// BPM-synced: periods in output frames.
+		zoomFramePeriod := p.ZoomBeats * 60.0 / float64(bpm) * video.FPS
 		zoomExpr = fmt.Sprintf("%.4f+%.4f*sin(2*PI*on/%.2f)", p.ZoomBase, p.ZoomAmp, zoomFramePeriod)
 
-		jitterFramePeriod := 2.0 * 60.0 / float64(bpm) * 30.0
+		jitterFramePeriod := 2.0 * 60.0 / float64(bpm) * video.FPS
 		jitterXExpr = fmt.Sprintf("iw/2-(iw/zoom/2)+%.1f*sin(2*PI*on/%.2f)", p.JitterAmp, jitterFramePeriod)
 		jitterYExpr = fmt.Sprintf("ih/2-(ih/zoom/2)+%.1f*cos(2*PI*on/%.2f)", p.JitterAmp, jitterFramePeriod*0.9)
-
-		brightnessFreq := float64(bpm) / (p.BrightnessBeats * 60.0)
-		brightnessExpr = fmt.Sprintf("%.4f*sin(2*PI*t*%.4f)", p.BrightnessAmp, brightnessFreq)
 	} else {
 		// Time-based defaults matching the original script feel
 		zoomExpr = fmt.Sprintf("%.4f+%.4f*sin(2*PI*on/200)", p.ZoomBase, p.ZoomAmp)
 		jitterXExpr = fmt.Sprintf("iw/2-(iw/zoom/2)+%.1f*sin(on/7)", p.JitterAmp)
 		jitterYExpr = fmt.Sprintf("ih/2-(ih/zoom/2)+%.1f*cos(on/9)", p.JitterAmp)
-		brightnessExpr = fmt.Sprintf("%.4f*sin(2*PI*t*0.6)", p.BrightnessAmp)
 	}
 
 	return fmt.Sprintf(
 		"scale=%d:%d:force_original_aspect_ratio=increase,"+
 			"crop=%d:%d,"+
-			"zoompan=z='%s':x='%s':y='%s':d=1:fps=30:s=%dx%d,"+
-			"gblur=sigma=%.1f:steps=1,"+
+			"zoompan=z='%s':x='%s':y='%s':d=1:fps=%d:s=%dx%d",
+		width, height,
+		width, height,
+		zoomExpr, jitterXExpr, jitterYExpr, video.FPS, width, height,
+	)
+}
+
+// GradeFilter applies blur, the brightness pulse, contrast/saturation,
+// vignette and grain. It works at whatever size its input is.
+func (p Preset) GradeFilter(bpm int) string {
+	brightnessExpr := fmt.Sprintf("%.4f*sin(2*PI*t*0.6)", p.BrightnessAmp)
+	if bpm > 0 {
+		brightnessFreq := float64(bpm) / (p.BrightnessBeats * 60.0)
+		brightnessExpr = fmt.Sprintf("%.4f*sin(2*PI*t*%.4f)", p.BrightnessAmp, brightnessFreq)
+	}
+
+	return fmt.Sprintf(
+		"gblur=sigma=%.1f:steps=1,"+
 			"eq=brightness='%s':contrast=%.2f:saturation=%.2f,"+
 			"vignette=PI*%.3f,"+
 			"noise=alls=%d:allf=t+u",
-		width, height,
-		width, height,
-		zoomExpr, jitterXExpr, jitterYExpr, width, height,
 		p.BlurSigma,
 		brightnessExpr, p.Contrast, p.Saturation,
 		p.VignetteFraction,

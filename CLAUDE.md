@@ -19,8 +19,18 @@ CI (`.github/workflows/ci.yml`) just runs `mise run ci`, plus a cross-compile ma
 
 ## Architecture
 
-`cmd/nltl-clip/main.go` (Cobra CLI) resolves a `Profile` (output dimensions, `internal/profile`) and a `Preset` (visual parameters, `internal/preset`, optionally overridden via `--config` YAML through `internal/config`), then calls `Preset.BuildFilter()` to generate a single ffmpeg `-vf` filter-graph string (zoompan/jitter/brightness expressions, BPM-synced or time-based) and hands it to `internal/ffmpeg.Render`, which shells out to ffmpeg directly — ffmpeg itself is the visual engine here, not just an encoder.
+`cmd/nltl-clip` (Cobra CLI) resolves a `Profile` (output dimensions, `internal/profile`), a `Preset` (visual parameters, `internal/preset`, optionally from `--config` YAML via `internal/config`) and a clip style, then hands `internal/ffmpeg.Render` a video input plus a filtergraph. ffmpeg itself is the visual engine, not just an encoder. `main.go` has the root command, `styles.go` the style subcommands and shared flags, and `render.go` the options, validation and per-style wiring (`renderOptions.videoInput`).
+
+A preset's filter is two halves: `MotionFilter` (scale/crop/zoompan wobble, per frame) and `GradeFilter` (blur, brightness pulse, eq, vignette, grain). `BuildFilter` is motion followed by grade.
+
+`ffmpeg.Render` has two video input kinds:
+- a still image looped with `-loop 1` (styles `single`, `grid`); `grid` is a pure filtergraph (`style.GridFilter`: motion at tile size → split → xstack → grade);
+- a raw RGBA frame stream on stdin from an `ffmpeg.FrameSource` (styles `cycle`, `train`), rendered in Go in `internal/style` (`Cycle` picks a pre-cropped image per frame; `Train` projects camera-facing billboards onto a perspective track, renders frames in parallel, writes them in order). The preset's full filter runs over these frames too.
+
+`internal/frames` decodes and cover-crops images; `internal/video` holds the shared frame rate and preview length.
 
 Zero-args invocation drops into `internal/interactive` (a `huh`-based TUI form) instead of requiring flags.
 
 Presets and profiles both follow the same shape: a flat struct, a small hardcoded built-in map, `Get(name) (T, bool)`, and a sorted `Names()`. Custom presets loaded via `--config` are checked first and fall back to the built-in map by name.
+
+`mise run test:integration` renders a short clip of each style with the real ffmpeg (CI does this too); unit tests use fake `ffmpeg`/`ffprobe` shell scripts on PATH.

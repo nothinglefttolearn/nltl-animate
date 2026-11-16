@@ -47,13 +47,22 @@ func TestLoadConfigEmptyPath(t *testing.T) {
 }
 
 func TestHeadlessCommand(t *testing.T) {
-	base := renderOptions{
-		AudioPath: "a.wav", ImagePath: "i.jpg",
-		ProfileName: "youtube", PresetName: "dark",
-	}
+	base := defaultRenderOptions()
+	base.AudioPath, base.ImagePaths = "a.wav", []string{"i.jpg"}
+	base.ProfileName, base.PresetName = "youtube", "dark"
+
 	full := base
 	full.BPM, full.Still, full.Preview = 138, true, true
 	full.ConfigPath, full.OutputDir = "nltl.yaml", "out"
+
+	cycle := base
+	cycle.Style, cycle.ImagePaths, cycle.Seed, cycle.Hold = styleCycle, []string{"a.png", "b.png"}, 42, 3
+
+	grid := base
+	grid.Style, grid.GridN = styleGrid, 4
+
+	train := base
+	train.Style, train.Train.Copies, train.Train.Vanish, train.TrainBG = styleTrain, 30, 0.7, "#112233"
 
 	tests := []struct {
 		name string
@@ -62,6 +71,9 @@ func TestHeadlessCommand(t *testing.T) {
 	}{
 		{"minimal", base, "nltl-clip --profile youtube --preset dark a.wav i.jpg"},
 		{"all flags", full, "nltl-clip --profile youtube --preset dark --bpm 138 --still --preview --config nltl.yaml --output-dir out a.wav i.jpg"},
+		{"cycle", cycle, "nltl-clip cycle --profile youtube --preset dark --hold 3 --seed 42 a.wav a.png b.png"},
+		{"grid", grid, "nltl-clip grid --profile youtube --preset dark --n 4 a.wav i.jpg"},
+		{"train only changed flags", train, "nltl-clip train --profile youtube --preset dark --copies 30 --vanish 0.7 --bg #112233 a.wav i.jpg"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
