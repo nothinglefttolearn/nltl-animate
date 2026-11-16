@@ -1,0 +1,47 @@
+[tools]
+go = "1.27.4"
+golangci-lint = "2.15.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
+
+[env]
+CGO_ENABLED = "0"
+
+[tasks.build]
+description = "Build the nltl-clip binary"
+run = "go build -trimpath -o nltl-clip ./cmd/nltl-clip/"
+sources = ["go.mod", "go.sum", "**/*.go"]
+outputs = ["nltl-clip"]
+
+[tasks.fmt]
+description = "Format code (gofmt + goimports via golangci-lint)"
+run = "golangci-lint fmt"
+
+[tasks."fmt:check"]
+description = "Fail if any file is not formatted"
+run = "golangci-lint fmt --diff"
+
+[tasks.lint]
+description = "Run golangci-lint (includes go vet)"
+run = "golangci-lint run"
+
+[tasks.test]
+description = "Run tests with the race detector and coverage"
+# The race detector requires cgo.
+env = { CGO_ENABLED = "1" }
+run = "go test -race -shuffle=on -covermode=atomic -coverprofile=coverage.out ./..."
+
+[tasks.vuln]
+description = "Scan dependencies and stdlib for known vulnerabilities"
+run = "govulncheck ./..."
+
+[tasks."tidy:check"]
+description = "Fail if go.mod/go.sum are not tidy"
+run = "go mod tidy -diff"
+
+[tasks."mod:verify"]
+description = "Verify downloaded modules match go.sum"
+run = "go mod verify"
+
+[tasks.ci]
+description = "Run every check CI runs"
+depends = ["fmt:check", "tidy:check", "mod:verify", "lint", "test", "vuln", "build"]

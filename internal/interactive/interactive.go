@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/rcaraher/nltl-video-gen/internal/preset"
-	"github.com/rcaraher/nltl-video-gen/internal/profile"
+
+	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
+	"github.com/nothinglefttolearn/nltl-clip/internal/profile"
 )
 
 var audioExts = map[string]bool{
@@ -21,6 +23,7 @@ var imageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true,
 }
 
+// Choices holds what the user picked in the form.
 type Choices struct {
 	AudioPath   string
 	ImagePath   string
@@ -30,29 +33,23 @@ type Choices struct {
 	Still       bool
 }
 
-func (c *Choices) HeadlessCommand() string {
-	parts := []string{
-		"nltl-clip",
-		"--profile", c.ProfileName,
-		"--preset", c.PresetName,
-	}
-	if c.BPM > 0 {
-		parts = append(parts, "--bpm", strconv.Itoa(c.BPM))
-	}
-	if c.Still {
-		parts = append(parts, "--still")
-	}
-	parts = append(parts, c.AudioPath, c.ImagePath)
-	return strings.Join(parts, " ")
+// Defaults pre-fills the form (typically from command-line flags) and supplies
+// custom presets loaded from --config so they can be picked alongside built-ins.
+type Defaults struct {
+	ProfileName   string
+	PresetName    string
+	BPM           int
+	Still         bool
+	CustomPresets []preset.Preset
 }
 
-func Run() (*Choices, error) {
+func Run(d Defaults) (*Choices, error) {
 	audioFiles, err := scanFiles(audioExts)
 	if err != nil {
 		return nil, err
 	}
 	if len(audioFiles) == 0 {
-		return nil, fmt.Errorf("no audio files found in current directory")
+		return nil, errors.New("no audio files found in current directory")
 	}
 
 	imageFiles, err := scanFiles(imageExts)
@@ -60,17 +57,22 @@ func Run() (*Choices, error) {
 		return nil, err
 	}
 	if len(imageFiles) == 0 {
-		return nil, fmt.Errorf("no image files found in current directory")
+		return nil, errors.New("no image files found in current directory")
 	}
+
+	presetOpts, presetNames := presetOptions(d.CustomPresets)
 
 	var (
 		audioPath   = audioFiles[0]
 		imagePath   = imageFiles[0]
-		profileName = profile.Names()[0]
-		presetName  = preset.Names()[0]
+		profileName = orFirst(d.ProfileName, profile.Names())
+		presetName  = orFirst(d.PresetName, presetNames)
 		bpmStr      = ""
-		still       = false
+		still       = d.Still
 	)
+	if d.BPM > 0 {
+		bpmStr = strconv.Itoa(d.BPM)
+	}
 
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -90,7 +92,7 @@ func Run() (*Choices, error) {
 				Value(&profileName),
 			huh.NewSelect[string]().
 				Title("Preset").
-				Options(presetOptions()...).
+				Options(presetOpts...).
 				Value(&presetName),
 		),
 		huh.NewGroup(
@@ -109,7 +111,7 @@ func Run() (*Choices, error) {
 
 	if err := form.Run(); err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
-			return nil, fmt.Errorf("cancelled")
+			return nil, errors.New("cancelled")
 		}
 		return nil, err
 	}
@@ -162,15 +164,41 @@ func profileOptions() []huh.Option[string] {
 	return opts
 }
 
-func presetOptions() []huh.Option[string] {
-	names := preset.Names()
-	opts := make([]huh.Option[string], len(names))
-	for i, name := range names {
+// presetOptions lists custom presets first, then built-ins not shadowed by a
+// custom preset of the same name. It also returns the option values in order.
+func presetOptions(custom []preset.Preset) ([]huh.Option[string], []string) {
+	var (
+		opts  []huh.Option[string]
+		names []string
+		seen  = make(map[string]bool)
+	)
+	for _, p := range custom {
+		if seen[p.Name] {
+			continue
+		}
+		seen[p.Name] = true
+		label := fmt.Sprintf("%-14s %s (config)", p.Name, p.Description)
+		opts = append(opts, huh.NewOption(label, p.Name))
+		names = append(names, p.Name)
+	}
+	for _, name := range preset.Names() {
+		if seen[name] {
+			continue
+		}
 		p, _ := preset.Get(name)
 		label := fmt.Sprintf("%-14s %s", name, p.Description)
-		opts[i] = huh.NewOption(label, name)
+		opts = append(opts, huh.NewOption(label, name))
+		names = append(names, name)
 	}
-	return opts
+	return opts, names
+}
+
+// orFirst returns want if it is one of options, otherwise the first option.
+func orFirst(want string, options []string) string {
+	if slices.Contains(options, want) {
+		return want
+	}
+	return options[0]
 }
 
 func validateBPM(s string) error {
@@ -179,7 +207,7 @@ func validateBPM(s string) error {
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil || n <= 0 {
-		return fmt.Errorf("enter a positive number or leave blank")
+		return errors.New("enter a positive number or leave blank")
 	}
 	return nil
 }

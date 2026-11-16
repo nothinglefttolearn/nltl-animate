@@ -4,20 +4,20 @@ A CLI tool for generating animated video clips from a music file and a still ima
 
 ## Requirements
 
-- [Go](https://go.dev) 1.21+
+- [Go](https://go.dev) 1.27.4+ (or [mise](https://mise.jdx.dev): `mise install`)
 - [ffmpeg](https://ffmpeg.org) with ffprobe in your PATH
 
 ## Install
 
 ```bash
-go install github.com/rcaraher/nltl-video-gen/cmd/nltl-clip@latest
+go install github.com/nothinglefttolearn/nltl-clip/cmd/nltl-clip@latest
 ```
 
 Or build locally:
 
 ```bash
-git clone https://github.com/rcaraher/nltl-video-gen
-cd nltl-video-gen
+git clone https://github.com/nothinglefttolearn/nltl-clip
+cd nltl-clip
 go build -o nltl-clip ./cmd/nltl-clip/
 ```
 

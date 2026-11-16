@@ -4,13 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+Tooling (Go, golangci-lint, govulncheck) is pinned in `mise.toml`; run `mise install` first.
+
 ```bash
-go build -o nltl-clip ./cmd/nltl-clip/   # build
-go vet ./...                              # lint
+mise run build        # build ./nltl-clip
+mise run test         # go test -race with coverage (race detector needs a C compiler)
+mise run lint         # golangci-lint (config in .golangci.yml; includes go vet)
+mise run fmt          # gofmt + goimports
+mise run ci           # everything CI runs: fmt:check, tidy:check, mod:verify, lint, test, vuln, build
 ./nltl-clip --preset industrial --bpm 138 --preview demo.wav cover.jpg
 ```
 
-There are no Go test files in this module yet.
+CI (`.github/workflows/ci.yml`) just runs `mise run ci`, plus a cross-compile matrix.
 
 ## Architecture
 

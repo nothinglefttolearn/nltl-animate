@@ -84,7 +84,7 @@ func runWithSpinner(title string, fn func() error) error {
 	go func() { done <- fn() }()
 
 	i := 0
-	line := fmt.Sprintf("  %s", title)
+	line := "  " + title
 	for {
 		select {
 		case err := <-done:

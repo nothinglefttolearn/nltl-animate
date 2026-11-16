@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/rcaraher/nltl-video-gen/internal/preset"
 	"gopkg.in/yaml.v3"
+
+	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
 )
 
 type Config struct {

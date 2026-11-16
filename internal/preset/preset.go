@@ -6,19 +6,19 @@ import (
 )
 
 type Preset struct {
-	Name               string  `yaml:"name"`
-	Description        string  `yaml:"description"`
-	ZoomBase           float64 `yaml:"zoom_base"`
-	ZoomAmp            float64 `yaml:"zoom_amp"`
-	ZoomBeats          float64 `yaml:"zoom_beats"`
-	JitterAmp          float64 `yaml:"jitter_amp"`
-	BlurSigma          float64 `yaml:"blur_sigma"`
-	Contrast           float64 `yaml:"contrast"`
-	Saturation         float64 `yaml:"saturation"`
-	BrightnessAmp      float64 `yaml:"brightness_amp"`
-	BrightnessBeats    float64 `yaml:"brightness_beats"`
-	VignetteFraction   float64 `yaml:"vignette_fraction"` // multiplied by PI
-	GrainStrength      int     `yaml:"grain_strength"`
+	Name             string  `yaml:"name"`
+	Description      string  `yaml:"description"`
+	ZoomBase         float64 `yaml:"zoom_base"`
+	ZoomAmp          float64 `yaml:"zoom_amp"`
+	ZoomBeats        float64 `yaml:"zoom_beats"`
+	JitterAmp        float64 `yaml:"jitter_amp"`
+	BlurSigma        float64 `yaml:"blur_sigma"`
+	Contrast         float64 `yaml:"contrast"`
+	Saturation       float64 `yaml:"saturation"`
+	BrightnessAmp    float64 `yaml:"brightness_amp"`
+	BrightnessBeats  float64 `yaml:"brightness_beats"`
+	VignetteFraction float64 `yaml:"vignette_fraction"` // multiplied by PI
+	GrainStrength    int     `yaml:"grain_strength"`
 }
 
 var BuiltIn = map[string]Preset{
