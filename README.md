@@ -1,6 +1,6 @@
 # nltl-clip
 
-A CLI tool for generating animated social media video clips from a music file and a still image. Built around ffmpeg with BPM-synced visuals and per-platform output profiles.
+A CLI tool for generating animated video clips from a music file and a still image. Built around ffmpeg with BPM-synced visuals and output profiles for social media platforms.
 
 ## Requirements
 
