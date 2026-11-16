@@ -53,6 +53,7 @@ Output files are saved alongside the audio file, named `{trackname}_{profile}.mp
 | `--preview` | `false` | Render 10s at low quality to check the look |
 | `--output-dir`, `-o` | same as audio | Where to write the output file |
 | `--config`, `-c` | — | YAML file with custom presets |
+| `--version` | — | Print the version and exit |
 
 ## Profiles
 
@@ -76,26 +77,34 @@ Run `nltl-clip presets` to list them.
 
 ## Custom Presets
 
-Copy `nltl.yaml.example` to `nltl.yaml` and edit the values:
+Copy `nltl.yaml.example` to `nltl.yaml` and edit the values. Each preset starts from another preset (`extends`, default `industrial`) and only overrides the fields you list:
 
 ```yaml
 presets:
   - name: my-preset
     description: My custom look
-    zoom_base: 1.02
-    zoom_amp: 0.01
-    zoom_beats: 8.0
-    jitter_amp: 2.0
-    blur_sigma: 0.6
-    contrast: 1.15
-    saturation: 0.7
-    brightness_amp: 0.02
-    brightness_beats: 4.0
-    vignette_fraction: 0.167
-    grain_strength: 25
+    extends: dark        # built-in, or a custom preset defined earlier in the file
+    contrast: 1.4
+    grain_strength: 30
 ```
 
-Custom presets fall back to built-ins if the name isn't found in the config file.
+| Field | Range | Notes |
+|-------|-------|-------|
+| `zoom_base` | 1–10 | base zoom level |
+| `zoom_amp` | ≥ 0 | zoom oscillation amplitude |
+| `zoom_beats` | > 0 | beats per zoom cycle |
+| `jitter_amp` | ≥ 0 | pixel micro-jitter |
+| `blur_sigma` | 0–1024 | gaussian blur (0 = sharp) |
+| `contrast` | -1000–1000 | 1 = unchanged |
+| `saturation` | 0–3 | 0 = monochrome, 1 = unchanged |
+| `brightness_amp` | 0–1 | brightness pulse amplitude |
+| `brightness_beats` | > 0 | beats per brightness cycle |
+| `vignette_fraction` | 0–0.5 | vignette angle as a fraction of π |
+| `grain_strength` | 0–100 | noise intensity |
+
+The config is checked when it's loaded. Unknown keys (typos), values out of range, duplicate names, and presets without a `name` are all reported together.
+
+`--preset` looks in the config first, then the built-ins, so a custom preset can replace a built-in of the same name.
 
 ## BPM Animations
 

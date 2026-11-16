@@ -80,3 +80,55 @@ func TestBuildFilter(t *testing.T) {
 		})
 	}
 }
+
+func TestBuiltInsValid(t *testing.T) {
+	for _, name := range Names() {
+		p, _ := Get(name)
+		if err := p.Validate(); err != nil {
+			t.Errorf("built-in %s invalid: %v", name, err)
+		}
+	}
+}
+
+func TestValidate(t *testing.T) {
+	base, _ := Get("industrial")
+
+	tests := []struct {
+		name    string
+		mutate  func(*Preset)
+		wantErr []string
+	}{
+		{"valid", func(*Preset) {}, nil},
+		{"missing name", func(p *Preset) { p.Name = "" }, []string{"name is required"}},
+		{"zero beats", func(p *Preset) { p.ZoomBeats, p.BrightnessBeats = 0, 0 },
+			[]string{"zoom_beats", "brightness_beats"}},
+		{"zoom below 1", func(p *Preset) { p.ZoomBase = 0.5 }, []string{"zoom_base"}},
+		{"out of range", func(p *Preset) {
+			p.Saturation, p.VignetteFraction, p.GrainStrength, p.BrightnessAmp = 4, 0.6, 101, -0.1
+		}, []string{"saturation", "vignette_fraction", "grain_strength", "brightness_amp"}},
+		{"negative amplitudes", func(p *Preset) { p.ZoomAmp, p.JitterAmp, p.BlurSigma = -1, -1, -1 },
+			[]string{"zoom_amp", "jitter_amp", "blur_sigma"}},
+		{"contrast", func(p *Preset) { p.Contrast = 2000 }, []string{"contrast"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := base
+			tt.mutate(&p)
+			err := p.Validate()
+			if len(tt.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			for _, s := range tt.wantErr {
+				if !strings.Contains(err.Error(), s) {
+					t.Errorf("error missing %q: %v", s, err)
+				}
+			}
+		})
+	}
+}

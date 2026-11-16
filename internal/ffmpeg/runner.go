@@ -1,6 +1,8 @@
 package ffmpeg
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +11,9 @@ import (
 	"strings"
 	"time"
 )
+
+// stderrTailLines caps how much tool output is copied into an error message.
+const stderrTailLines = 20
 
 type Options struct {
 	ImagePath  string
@@ -27,11 +32,21 @@ func GetDuration(audioPath string) (float64, error) {
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		audioPath,
 	)
+	// Output() captures stderr into the returned *exec.ExitError.
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("ffprobe: %w", err)
+		var stderr []byte
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			stderr = exitErr.Stderr
+		}
+		return 0, commandError("ffprobe", err, stderr)
 	}
-	return strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	s := strings.TrimSpace(string(out))
+	d, err := strconv.ParseFloat(s, 64)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("ffprobe: could not read a duration from %s (got %q)", audioPath, s)
+	}
+	return d, nil
 }
 
 func Render(opts Options) error {
@@ -40,14 +55,18 @@ func Render(opts Options) error {
 		duration = 10
 	}
 
-	args := []string{
-		"-y",
+	args := []string{"-y", "-hide_banner"}
+	if !opts.Verbose {
+		// Only errors on stderr, so what we capture is the useful part.
+		args = append(args, "-loglevel", "error")
+	}
+	args = append(args,
 		"-loop", "1",
 		"-i", opts.ImagePath,
 		"-i", opts.AudioPath,
 		"-vf", opts.Filter,
 		"-c:v", "libx264",
-	}
+	)
 
 	if opts.Preview {
 		args = append(args, "-preset", "ultrafast", "-crf", "35")
@@ -70,12 +89,47 @@ func Render(opts Options) error {
 	if opts.Verbose {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		return cmd.Run()
+		if err := cmd.Run(); err != nil {
+			return commandError("ffmpeg", err, nil) // output already shown
+		}
+		return nil
 	}
 
+	var stderr bytes.Buffer
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	return runWithSpinner("Rendering", cmd.Run)
+	cmd.Stderr = &stderr
+	if err := runWithSpinner("Rendering", cmd.Run); err != nil {
+		return commandError("ffmpeg", err, stderr.Bytes())
+	}
+	return nil
+}
+
+// commandError wraps a failed tool invocation with the last lines of its
+// stderr, and turns a missing binary into an actionable message.
+func commandError(name string, err error, stderr []byte) error {
+	if errors.Is(err, exec.ErrNotFound) {
+		return fmt.Errorf("%s not found in PATH — install ffmpeg (which includes ffprobe): %w", name, err)
+	}
+	tail := lastLines(strings.TrimSpace(string(stderr)), stderrTailLines)
+	if tail == "" {
+		return fmt.Errorf("%s failed: %w", name, err)
+	}
+	return fmt.Errorf("%s failed: %w\n%s", name, err, indent(tail, "  "))
+}
+
+func lastLines(s string, n int) string {
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		lines = append([]string{"..."}, lines[len(lines)-n:]...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func indent(s, prefix string) string {
+	return prefix + strings.ReplaceAll(s, "\n", "\n"+prefix)
 }
 
 func runWithSpinner(title string, fn func() error) error {

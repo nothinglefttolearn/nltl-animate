@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,24 @@ var (
 	valueStyle  = lipgloss.NewStyle().Bold(true)
 	accentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
 )
+
+// version can be set at build time:
+//
+//	go build -ldflags "-X main.version=v1.2.3" ./cmd/nltl-clip
+var version string
+
+// buildVersion prefers an injected version, then the module version Go
+// records at build time (a tag for `go install ...@vX`, a VCS pseudo-version
+// for local builds).
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
 
 func label(s string) string { return labelStyle.Render(fmt.Sprintf("%-10s", s)) }
 
@@ -52,7 +71,12 @@ func main() {
 			}
 			return fmt.Errorf("expected 0 args (interactive) or 2 args (audio image), got %d", len(args))
 		},
+		Version: buildVersion(),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args and flags parsed fine, so any error from here on is a
+			// runtime failure (bad config, ffmpeg) and usage text is noise.
+			cmd.SilenceUsage = true
+
 			cfg, err := loadConfig(opts.ConfigPath)
 			if err != nil {
 				return err
@@ -162,6 +186,10 @@ func (o renderOptions) headlessCommand() string {
 }
 
 func renderClip(opts renderOptions, cfg *config.Config) error {
+	if opts.BPM < 0 {
+		return fmt.Errorf("--bpm must be positive (or 0 for time-based animation), got %d", opts.BPM)
+	}
+
 	prof, ok := profile.Get(opts.ProfileName)
 	if !ok {
 		return fmt.Errorf("unknown profile %q — try: %s", opts.ProfileName, strings.Join(profile.Names(), ", "))

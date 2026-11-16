@@ -71,3 +71,17 @@ func TestHeadlessCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildVersionInjected(t *testing.T) {
+	orig := version
+	t.Cleanup(func() { version = orig })
+
+	version = "v9.9.9"
+	if got := buildVersion(); got != "v9.9.9" {
+		t.Errorf("buildVersion() = %q, want injected v9.9.9", got)
+	}
+	version = ""
+	if got := buildVersion(); got == "" {
+		t.Error("buildVersion() returned empty string")
+	}
+}

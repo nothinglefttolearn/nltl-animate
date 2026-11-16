@@ -3,6 +3,7 @@ package preset
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 type Preset struct {
@@ -81,6 +82,39 @@ func Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Validate reports every field outside the range the generated ffmpeg filter
+// graph accepts. Ranges follow the ffmpeg filters each field feeds into.
+func (p Preset) Validate() error {
+	var problems []string
+	check := func(ok bool, format string, args ...any) {
+		if !ok {
+			problems = append(problems, fmt.Sprintf(format, args...))
+		}
+	}
+
+	check(p.Name != "", "name is required")
+	// zoompan clamps z to [1, 10]; below 1 would silently do nothing.
+	check(p.ZoomBase >= 1 && p.ZoomBase <= 10, "zoom_base must be between 1 and 10, got %g", p.ZoomBase)
+	check(p.ZoomAmp >= 0, "zoom_amp must be >= 0, got %g", p.ZoomAmp)
+	// Beat counts are divisors in BPM mode; 0 would put Inf into the filter.
+	check(p.ZoomBeats > 0, "zoom_beats must be > 0, got %g", p.ZoomBeats)
+	check(p.BrightnessBeats > 0, "brightness_beats must be > 0, got %g", p.BrightnessBeats)
+	check(p.JitterAmp >= 0, "jitter_amp must be >= 0, got %g", p.JitterAmp)
+	check(p.BlurSigma >= 0 && p.BlurSigma <= 1024, "blur_sigma must be between 0 and 1024, got %g", p.BlurSigma)
+	check(p.Contrast >= -1000 && p.Contrast <= 1000, "contrast must be between -1000 and 1000, got %g", p.Contrast)
+	check(p.Saturation >= 0 && p.Saturation <= 3, "saturation must be between 0 and 3, got %g", p.Saturation)
+	check(p.BrightnessAmp >= 0 && p.BrightnessAmp <= 1, "brightness_amp must be between 0 and 1, got %g", p.BrightnessAmp)
+	// vignette angle is limited to [0, PI/2].
+	check(p.VignetteFraction >= 0 && p.VignetteFraction <= 0.5,
+		"vignette_fraction must be between 0 and 0.5, got %g", p.VignetteFraction)
+	check(p.GrainStrength >= 0 && p.GrainStrength <= 100, "grain_strength must be between 0 and 100, got %d", p.GrainStrength)
+
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("preset %q:\n  - %s", p.Name, strings.Join(problems, "\n  - "))
 }
 
 func (p Preset) BuildFilter(width, height, bpm int) string {
