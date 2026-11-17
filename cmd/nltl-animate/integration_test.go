@@ -35,22 +35,23 @@ func TestIntegrationNoAudioLoops(t *testing.T) {
 	tests := []struct {
 		name   string
 		args   []string
-		out    string
+		out    string // name between nltl_animate_ and the timestamp
 		frames int
 	}{
-		{"one image", []string{red}, "red_single_loop.mp4", 90},
-		{"several images", []string{"--hold", "5", red, blue, half}, "red_cycle_loop.mp4", 15},
-		{"grid mixed", []string{"grid", "--n", "2", "--tiles", "mixed", "--hold", "3", red, blue, half}, "red_grid2_mixed_loop.mp4", 9},
-		{"train", []string{"train", "--bpm", "138", red, half}, "red_train_loop.mp4", 26},
+		{"one image", []string{red}, "single_loop_noaudio", 90},
+		{"several images", []string{"--hold", "5", red, blue, half}, "cycle_loop_noaudio", 15},
+		{"grid mixed", []string{"grid", "--n", "2", "--tiles", "mixed", "--hold", "3", red, blue, half}, "grid2_mixed_loop_noaudio", 9},
+		{"train", []string{"train", "--bpm", "138", red, half}, "train_loop_noaudio", 26},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			useTestTime(t)
 			cmd := newRootCmd()
 			cmd.SetArgs(append(tt.args, "--no-audio", "-o", dir))
 			if err := cmd.Execute(); err != nil {
 				t.Fatalf("render: %v", err)
 			}
-			info := probe(t, filepath.Join(dir, tt.out))
+			info := probe(t, filepath.Join(dir, "nltl_animate_"+tt.out+"_"+stamp+".mp4"))
 			if strings.Contains(info, "codec_type=audio") {
 				t.Errorf("%s has an audio stream:\n%s", tt.out, info)
 			}
@@ -75,25 +76,26 @@ func TestIntegrationRenderEveryStyle(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
-		out  string
+		out  string // name between nltl_animate_ and the timestamp
 		w, h int
 	}{
-		{"single", []string{audio, red}, "tone_single_preview.mp4", 1080, 1080},
-		{"grid", []string{"grid", "--n", "3", audio, red}, "tone_grid3_preview.mp4", 1080, 1080},
-		{"several images", []string{"--seed", "1", audio, red, blue}, "tone_cycle_preview.mp4", 1080, 1080},
-		{"grid same", []string{"grid", "--n", "2", "--bpm", "120", audio, red, blue}, "tone_grid2_preview.mp4", 1080, 1080},
-		{"grid mixed", []string{"grid", "--n", "3", "--tiles", "mixed", audio, red, blue, half}, "tone_grid3_mixed_preview.mp4", 1080, 1080},
-		{"train", []string{"train", "--bpm", "140", audio, half}, "tone_train_preview.mp4", 1080, 1080},
+		{"single", []string{audio, red}, "single_audio_preview", 1080, 1080},
+		{"grid", []string{"grid", "--n", "3", audio, red}, "grid3_audio_preview", 1080, 1080},
+		{"several images", []string{"--seed", "1", audio, red, blue}, "cycle_audio_preview", 1080, 1080},
+		{"grid same", []string{"grid", "--n", "2", "--bpm", "120", audio, red, blue}, "grid2_audio_preview", 1080, 1080},
+		{"grid mixed", []string{"grid", "--n", "3", "--tiles", "mixed", audio, red, blue, half}, "grid3_mixed_audio_preview", 1080, 1080},
+		{"train", []string{"train", "--bpm", "140", audio, half}, "train_audio_preview", 1080, 1080},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			useTestTime(t)
 			cmd := newRootCmd()
 			cmd.SetArgs(append([]string{"--preview", "-o", dir}, tt.args...))
 			if err := cmd.Execute(); err != nil {
 				t.Fatalf("render: %v", err)
 			}
 
-			out := filepath.Join(dir, tt.out)
+			out := filepath.Join(dir, "nltl_animate_"+tt.out+"_"+stamp+".mp4")
 			probe, err := exec.Command("ffprobe", "-v", "error",
 				"-show_entries", "stream=codec_type,width,height:format=duration",
 				"-of", "default=noprint_wrappers=1", out).Output()

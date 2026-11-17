@@ -47,11 +47,19 @@ nltl-animate --preset dark --bpm auto demo.wav cover.jpg
 nltl-animate --config nltl.yaml --preset my-preset --bpm 138 demo.wav cover.jpg
 ```
 
-Output files are saved alongside the audio file (or in `--output-dir`), named after the track and the style: `demo_single.mp4`, `demo_cycle.mp4` (single with several images), `demo_grid4.mp4`, `demo_grid3_mixed.mp4`, `demo_train.mp4`, with `_preview` added for previews.
+Output files are saved alongside the audio file (or the first image with `--no-audio`, or in `--output-dir`). Each name gives the style, whether the clip has audio, and the time of the render, so repeated renders never replace each other:
+
+```
+nltl_animate_single_audio_20261117-215301.mp4
+nltl_animate_cycle_audio_preview_20261117-215301.mp4        # single with several images, --preview
+nltl_animate_grid3_mixed_loop_noaudio_20261117-215301.mp4   # grid --tiles mixed --no-audio
+```
+
+If the file already exists (two renders in the same second), you are asked before it is replaced. Without a terminal to ask on, the render stops instead, unless you pass `--overwrite`.
 
 ### Silent loops (`--no-audio`)
 
-With `--no-audio` there is no audio file: every argument is an image, and the output is a silent clip that loops seamlessly when played on repeat. It works with every style, saved next to the first image as `{image}_{style}_loop.mp4`.
+With `--no-audio` there is no audio file: every argument is an image, and the output is a silent clip that loops seamlessly when played on repeat. It works with every style, saved next to the first image.
 
 - **Several images (single, grid):** the clip is one pass through the images. They are shuffled once (by `--seed`) and each is shown once, for `--hold`/`--hold-beats`, so playing it on repeat shows the same sequence over and over, with the loop point falling exactly on an image switch. With `--tiles mixed` there is one step per image, and every tile also changes image at the loop point.
 - **One image (single, grid):** 3 seconds, long enough for the preset's wandering motion.
@@ -138,6 +146,7 @@ nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # a, b, c, a, b, 
 | `--preview` | `false` | Render 10s at low quality to check the look |
 | `--no-audio` | `false` | No audio file: arguments are all images, output is a silent seamless loop |
 | `--output-dir`, `-o` | same as audio (or first image) | Where to write the output file |
+| `--overwrite` | `false` | Replace an existing output file without asking |
 | `--still` | `false` | Disable zoom and jitter (brightness pulse stays) |
 | `--verbose`, `-v` | `false` | Show ffmpeg's output while rendering |
 | `--config`, `-c` | — | YAML file with custom presets |

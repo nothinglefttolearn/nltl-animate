@@ -20,7 +20,8 @@ func addRenderFlags(cmd *cobra.Command, o *renderOptions) {
 		"no audio file: every argument is an image, and the silent clip loops seamlessly")
 	f.BoolVar(&o.Still, "still", o.Still, "disable spatial motion (zoom, jitter) — keeps brightness pulsing")
 	f.BoolVarP(&o.Verbose, "verbose", "v", o.Verbose, "show raw ffmpeg output during render")
-	f.StringVarP(&o.OutputDir, "output-dir", "o", o.OutputDir, "output directory (default: same as audio file)")
+	f.StringVarP(&o.OutputDir, "output-dir", "o", o.OutputDir, "output directory (default: same as audio file, or first image with --no-audio)")
+	f.BoolVar(&o.Overwrite, "overwrite", o.Overwrite, "replace an existing output file without asking")
 	f.StringVarP(&o.ConfigPath, "config", "c", o.ConfigPath, "YAML config file with custom presets")
 }
 

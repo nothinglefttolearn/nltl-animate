@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func opts(s clipStyle, images ...string) renderOptions {
@@ -80,39 +81,123 @@ func TestValidateFillsTrainFromFlags(t *testing.T) {
 	}
 }
 
+// testTime is the clock in tests, so output names are known: stamp is its
+// file-name form.
+var testTime = time.Date(2026, 11, 17, 21, 53, 1, 0, time.UTC)
+
+const stamp = "20261117-215301"
+
 func TestOutputPath(t *testing.T) {
 	cases := []struct {
 		o    func() renderOptions
 		want string
 	}{
-		{func() renderOptions { return opts(styleSingle, "i") }, "track_single.mp4"},
-		{func() renderOptions { o := opts(styleGrid, "i"); o.GridN = 5; return o }, "track_grid5.mp4"},
-		{func() renderOptions { return opts(styleSingle, "a", "b") }, "track_cycle.mp4"},
-		{func() renderOptions { return opts(styleGrid, "a", "b") }, "track_grid3.mp4"},
-		{func() renderOptions { o := opts(styleGrid, "a", "b"); o.Tiles = tilesMixed; return o }, "track_grid3_mixed.mp4"},
-		{func() renderOptions { o := opts(styleTrain, "i"); o.Preview = true; return o }, "track_train_preview.mp4"},
+		{func() renderOptions { return opts(styleSingle, "i") }, "nltl_animate_single_audio_" + stamp + ".mp4"},
+		{func() renderOptions { o := opts(styleGrid, "i"); o.GridN = 5; return o }, "nltl_animate_grid5_audio_" + stamp + ".mp4"},
+		{func() renderOptions { return opts(styleSingle, "a", "b") }, "nltl_animate_cycle_audio_" + stamp + ".mp4"},
+		{func() renderOptions { return opts(styleGrid, "a", "b") }, "nltl_animate_grid3_audio_" + stamp + ".mp4"},
+		{func() renderOptions { o := opts(styleGrid, "a", "b"); o.Tiles = tilesMixed; return o }, "nltl_animate_grid3_mixed_audio_" + stamp + ".mp4"},
+		{func() renderOptions { o := opts(styleTrain, "i"); o.Preview = true; return o }, "nltl_animate_train_audio_preview_" + stamp + ".mp4"},
 	}
 	for _, c := range cases {
 		o := c.o()
-		if got := o.outputPath(); got != c.want {
+		if got := o.outputPath(testTime); got != c.want {
 			t.Errorf("%s: got %q, want %q", o.Style, got, c.want)
 		}
 	}
 	o := opts(styleGrid, "/art/a.png", "/art/b.png")
 	o.NoAudio, o.AudioPath, o.Tiles = true, "", tilesMixed
-	if got := o.outputPath(); got != filepath.Join("/art", "a_grid3_mixed_loop.mp4") {
+	if got := o.outputPath(testTime); got != filepath.Join("/art", "nltl_animate_grid3_mixed_loop_noaudio_"+stamp+".mp4") {
 		t.Errorf("no audio: got %q", got)
 	}
-
 	o = opts(styleSingle, "i")
-	o.AudioPath = "/music/song.mp4"
-	if got := o.outputPath(); got == o.AudioPath {
-		t.Errorf("output %q would overwrite the audio", got)
-	}
 	o.AudioPath, o.OutputDir = "/music/song.flac", "/out"
-	if got := o.outputPath(); got != filepath.Join("/out", "song_single.mp4") {
+	if got := o.outputPath(testTime); got != filepath.Join("/out", "nltl_animate_single_audio_"+stamp+".mp4") {
 		t.Errorf("got %q", got)
 	}
+	if a, b := o.outputPath(testTime), o.outputPath(testTime.Add(time.Second)); a == b {
+		t.Errorf("renders a second apart share a name: %s", a)
+	}
+}
+
+// fakePrompt makes the overwrite question come from a person typing answer,
+// or from no terminal when human is false.
+func fakePrompt(t *testing.T, human bool, answer string) {
+	t.Helper()
+	oldIn, oldHuman := promptIn, promptIsHuman
+	promptIn, promptIsHuman = strings.NewReader(answer), func() bool { return human }
+	t.Cleanup(func() { promptIn, promptIsHuman = oldIn, oldHuman })
+}
+
+func TestConfirmOverwrite(t *testing.T) {
+	existing := filepath.Join(t.TempDir(), "out.mp4")
+	if err := os.WriteFile(existing, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name      string
+		path      string
+		overwrite bool
+		human     bool
+		answer    string
+		wantErr   string
+	}{
+		{"new file", existing + ".new", false, false, "", ""},
+		{"--overwrite", existing, true, false, "", ""},
+		{"no terminal", existing, false, false, "", "--overwrite"},
+		{"yes", existing, false, true, "y\n", ""},
+		{"YES", existing, false, true, " YES \n", ""},
+		{"no", existing, false, true, "n\n", "not overwriting"},
+		{"just enter", existing, false, true, "\n", "not overwriting"},
+		{"end of input", existing, false, true, "", "not overwriting"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fakePrompt(t, c.human, c.answer)
+			o := opts(styleSingle, "i")
+			o.Overwrite = c.overwrite
+			err := o.confirmOverwrite(c.path)
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("err = %v, want containing %q", err, c.wantErr)
+			}
+		})
+	}
+}
+
+func TestCLIRefusesToOverwriteWithoutAsking(t *testing.T) {
+	dir := t.TempDir()
+	red := writePNG(t, dir, "red.png", color.RGBA{R: 255, A: 255})
+	useTestTime(t)
+	fakePrompt(t, false, "")
+	fakeFFmpeg(t)
+	out := filepath.Join(dir, "nltl_animate_single_loop_noaudio_"+stamp+".mp4")
+	if err := os.WriteFile(out, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--no-audio", red})
+	cmd.SetOut(new(strings.Builder))
+	cmd.SetErr(new(strings.Builder))
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("err = %v", err)
+	}
+	args, _ := runCLI(t, "--no-audio", "--overwrite", red)
+	if got := args[len(args)-1]; got != out {
+		t.Errorf("--overwrite rendered to %s, want %s", got, out)
+	}
+}
+
+func useTestTime(t *testing.T) {
+	t.Helper()
+	old := now
+	now = func() time.Time { return testTime }
+	t.Cleanup(func() { now = old })
 }
 
 // --- end-to-end through the cobra commands, against fake ffprobe/ffmpeg ---
@@ -167,6 +252,7 @@ func fakeFFmpeg(t *testing.T) (argsFile, stdinFile string) {
 func runCLI(t *testing.T, args ...string) (ffArgs []string, stdinBytes string) {
 	t.Helper()
 	argsFile, stdinFile := fakeFFmpeg(t)
+	useTestTime(t)
 	cmd := newRootCmd()
 	cmd.SetArgs(args)
 	cmd.SetOut(new(strings.Builder))
@@ -203,7 +289,7 @@ func TestCLIStyles(t *testing.T) {
 		if argAfter(args, "-i") != red || stdin != "" {
 			t.Errorf("single should loop the still image: %v", args)
 		}
-		if out := args[len(args)-1]; out != filepath.Join(dir, "song_single.mp4") {
+		if out := args[len(args)-1]; out != filepath.Join(dir, "nltl_animate_single_audio_"+stamp+".mp4") {
 			t.Errorf("output = %s", out)
 		}
 	})
@@ -214,7 +300,7 @@ func TestCLIStyles(t *testing.T) {
 		if !strings.Contains(fc, "xstack=inputs=16:grid=4x4") || !strings.Contains(fc, "scale=1080:1080") {
 			t.Errorf("filter = %s", fc)
 		}
-		if out := args[len(args)-1]; !strings.HasSuffix(out, "song_grid4.mp4") {
+		if out := args[len(args)-1]; !strings.HasSuffix(out, "nltl_animate_grid4_audio_"+stamp+".mp4") {
 			t.Errorf("output = %s", out)
 		}
 	})
@@ -227,7 +313,7 @@ func TestCLIStyles(t *testing.T) {
 		if stdin != frameBytes {
 			t.Errorf("ffmpeg read %s bytes, want %s", stdin, frameBytes)
 		}
-		if out := args[len(args)-1]; !strings.HasSuffix(out, "song_cycle.mp4") {
+		if out := args[len(args)-1]; !strings.HasSuffix(out, "nltl_animate_cycle_audio_"+stamp+".mp4") {
 			t.Errorf("output = %s", out)
 		}
 	})
@@ -252,7 +338,7 @@ func TestCLIStyles(t *testing.T) {
 		if strings.Count(fc, "zoompan") != 4 || !strings.Contains(fc, "crop=540:540:540:540") {
 			t.Errorf("grid mixed should move each tile separately: %s", fc)
 		}
-		if out := args[len(args)-1]; !strings.HasSuffix(out, "song_grid2_mixed.mp4") {
+		if out := args[len(args)-1]; !strings.HasSuffix(out, "nltl_animate_grid2_mixed_audio_"+stamp+".mp4") {
 			t.Errorf("output = %s", out)
 		}
 	})
@@ -272,7 +358,7 @@ func TestCLIStyles(t *testing.T) {
 		if argAfter(args, "-i") != "pipe:0" || stdin != frameBytes {
 			t.Errorf("train should stream frames: %v (stdin %s)", args, stdin)
 		}
-		if out := args[len(args)-1]; !strings.HasSuffix(out, "song_train.mp4") {
+		if out := args[len(args)-1]; !strings.HasSuffix(out, "nltl_animate_train_audio_"+stamp+".mp4") {
 			t.Errorf("output = %s", out)
 		}
 	})
@@ -415,7 +501,7 @@ func TestCLINoAudio(t *testing.T) {
 		if argAfter(args, "-i") != red {
 			t.Errorf("single should loop the still image: %v", args)
 		}
-		if out := args[len(args)-1]; out != filepath.Join(dir, "red_single_loop.mp4") {
+		if out := args[len(args)-1]; out != filepath.Join(dir, "nltl_animate_single_loop_noaudio_"+stamp+".mp4") {
 			t.Errorf("output = %s", out)
 		}
 	})
@@ -426,7 +512,7 @@ func TestCLINoAudio(t *testing.T) {
 		if stdin != "55987200" { // 12 frames * 1080*1080*4
 			t.Errorf("ffmpeg read %s bytes, want 12 frames", stdin)
 		}
-		if out := args[len(args)-1]; out != filepath.Join(dir, "red_cycle_loop.mp4") {
+		if out := args[len(args)-1]; out != filepath.Join(dir, "nltl_animate_cycle_loop_noaudio_"+stamp+".mp4") {
 			t.Errorf("output = %s", out)
 		}
 	})

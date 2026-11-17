@@ -17,6 +17,7 @@ var (
 	labelStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	valueStyle  = lipgloss.NewStyle().Bold(true)
 	accentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
+	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 )
 
 // version can be set at build time:

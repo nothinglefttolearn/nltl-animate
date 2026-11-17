@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"image"
+	"io"
+	"io/fs"
 	"math/rand/v2"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nothinglefttolearn/nltl-animate/internal/config"
 	"github.com/nothinglefttolearn/nltl-animate/internal/ffmpeg"
@@ -46,6 +51,7 @@ type renderOptions struct {
 	Style      clipStyle
 	AudioPath  string   // empty with NoAudio
 	NoAudio    bool     // silent clip that loops seamlessly (see loopFrames)
+	Overwrite  bool     // replace an existing output file without asking
 	ImagePaths []string // one or more
 	PresetName string
 	BPM        int
@@ -195,19 +201,27 @@ func (o *renderOptions) holdFrames() int {
 	}
 }
 
-// outputPath is {track}_{style}[_detail][_preview].mp4 next to the audio (or
-// in --output-dir). The style is always named, so the output can never
-// overwrite the audio file itself (e.g. an .mp4 soundtrack). Without audio it
-// is named after the first image and ends in _loop.
-func (o *renderOptions) outputPath() string {
-	named := o.AudioPath
-	if o.NoAudio {
-		named = o.ImagePaths[0]
-	}
-	base := strings.TrimSuffix(filepath.Base(named), filepath.Ext(named))
+// outputPrefix starts every output file name.
+const outputPrefix = "nltl_animate"
+
+// timestampLayout is the render time in output file names, so repeated
+// renders never collide.
+const timestampLayout = "20060102-150405"
+
+// now is the clock for output file names; tests replace it.
+var now = time.Now
+
+// outputPath is nltl_animate_{style}[_detail]_{audio|loop_noaudio}[_preview]_{timestamp}.mp4
+// next to the audio file, or the first image with --no-audio (or in
+// --output-dir).
+func (o *renderOptions) outputPath(at time.Time) string {
 	dir := o.OutputDir
 	if dir == "" {
-		dir = filepath.Dir(named)
+		near := o.AudioPath
+		if o.NoAudio {
+			near = o.ImagePaths[0]
+		}
+		dir = filepath.Dir(near)
 	}
 
 	var suffix string
@@ -226,12 +240,48 @@ func (o *renderOptions) outputPath() string {
 		suffix = string(o.Style)
 	}
 	if o.NoAudio {
-		suffix += "_loop"
+		suffix += "_loop_noaudio"
+	} else {
+		suffix += "_audio"
 	}
 	if o.Preview {
 		suffix += "_preview"
 	}
-	return filepath.Join(dir, fmt.Sprintf("%s_%s.mp4", base, suffix))
+	return filepath.Join(dir, fmt.Sprintf("%s_%s_%s.mp4", outputPrefix, suffix, at.Format(timestampLayout)))
+}
+
+// Overridable in tests: where the overwrite question is read from, and
+// whether that is a person at a terminal.
+var (
+	promptIn      io.Reader = os.Stdin
+	promptIsHuman           = func() bool {
+		fi, err := os.Stdin.Stat()
+		return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	}
+)
+
+// confirmOverwrite returns nil if path does not exist, if --overwrite was
+// given, or if the user agrees to replace it. Without a terminal to ask on,
+// an existing file is an error.
+func (o *renderOptions) confirmOverwrite(path string) error {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("checking output file: %w", err)
+	}
+	if o.Overwrite {
+		return nil
+	}
+	if !promptIsHuman() {
+		return fmt.Errorf("%s already exists — pass --overwrite to replace it", path)
+	}
+	fmt.Printf("%s %s already exists. Overwrite? [y/N] ", warnStyle.Render("Warning:"), path)
+	answer, _ := bufio.NewReader(promptIn).ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return nil
+	}
+	return errors.New("not overwriting " + path)
 }
 
 // loopFrames is the length of a silent clip, chosen so it loops seamlessly:
@@ -471,6 +521,10 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	if err := o.validate(); err != nil {
 		return err
 	}
+	outPath := o.outputPath(now())
+	if err := o.confirmOverwrite(outPath); err != nil {
+		return err
+	}
 	if o.AutoBPM {
 		bpm, err := detectBPM(o.AudioPath)
 		if err != nil {
@@ -505,7 +559,7 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 		return err
 	}
 	ff.AudioPath = o.AudioPath
-	ff.OutputPath = o.outputPath()
+	ff.OutputPath = outPath
 	ff.Duration = duration
 	if o.NoAudio {
 		ff.NumFrames = o.loopFrames()
