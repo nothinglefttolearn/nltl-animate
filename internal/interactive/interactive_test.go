@@ -58,3 +58,14 @@ func TestValidateImagesAndGridN(t *testing.T) {
 		}
 	}
 }
+
+func TestAudioOptionsEndWithSilentLoop(t *testing.T) {
+	opts := audioOptions([]string{"a.wav", "b.mp3"})
+	var got []string
+	for _, o := range opts {
+		got = append(got, o.Value)
+	}
+	if !slices.Equal(got, []string{"a.wav", "b.mp3", ""}) {
+		t.Errorf("values = %q", got)
+	}
+}

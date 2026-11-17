@@ -329,3 +329,44 @@ func TestTrainOptionsValidate(t *testing.T) {
 		t.Errorf("BPM mode validation wrong: %v", err)
 	}
 }
+
+func TestTrainLoopFrames(t *testing.T) {
+	o := DefaultTrainOptions() // 1.5 copies per second: one every 20 frames
+	if got := TrainLoopFrames(o, 3, 0); got != 60 {
+		t.Errorf("3 images: %d frames, want 60 (three copies)", got)
+	}
+	if got := TrainLoopFrames(o, 1, 90); got != 100 {
+		t.Errorf("1 image, at least 90: %d frames, want 100 (five copies)", got)
+	}
+	if got := TrainLoopFrames(o, 2, 80); got != 80 {
+		t.Errorf("2 images, at least 80: %d frames, want 80", got)
+	}
+	o.BPM = 138 // 13.04 frames per copy
+	if got := TrainLoopFrames(o, 2, 0); got != 26 {
+		t.Errorf("138 BPM, 2 images: %d frames, want 26", got)
+	}
+}
+
+func TestTrainLoopIsSeamless(t *testing.T) {
+	// 138 BPM does not divide into whole frames; the speed is nudged so
+	// frame LoopFrames matches frame 0 exactly, images included.
+	imgs := []image.Image{ring(32), solid(40, 32, color.RGBA{G: 200, A: 255}), solid(24, 32, color.RGBA{B: 200, A: 255})}
+	o := DefaultTrainOptions()
+	o.BPM, o.Copies = 138, 6
+	o.LoopFrames = TrainLoopFrames(o, len(imgs), 0)
+	tr, err := NewTrain(imgs, 96, 96, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, loop := image.NewRGBA(image.Rect(0, 0, 96, 96)), image.NewRGBA(image.Rect(0, 0, 96, 96))
+	tr.RenderFrame(first, 0)
+	tr.RenderFrame(loop, o.LoopFrames)
+	if !bytes.Equal(first.Pix, loop.Pix) {
+		t.Errorf("frame %d differs from frame 0", o.LoopFrames)
+	}
+	mid := image.NewRGBA(image.Rect(0, 0, 96, 96))
+	tr.RenderFrame(mid, o.LoopFrames/len(imgs))
+	if bytes.Equal(first.Pix, mid.Pix) {
+		t.Error("one copy later looks the same as frame 0: the images should have moved along")
+	}
+}

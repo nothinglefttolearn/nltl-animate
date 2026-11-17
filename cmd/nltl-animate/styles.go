@@ -16,6 +16,8 @@ func addRenderFlags(cmd *cobra.Command, o *renderOptions) {
 		"visual preset (industrial, clean, dark, or custom from --config)")
 	f.Var(bpmFlag{o}, "bpm", `track BPM for beat-synced animations, or "auto" to detect it (0 = time-based defaults)`)
 	f.BoolVar(&o.Preview, "preview", o.Preview, "render a short low-quality preview")
+	f.BoolVar(&o.NoAudio, "no-audio", o.NoAudio,
+		"no audio file: every argument is an image, and the silent clip loops seamlessly")
 	f.BoolVar(&o.Still, "still", o.Still, "disable spatial motion (zoom, jitter) — keeps brightness pulsing")
 	f.BoolVarP(&o.Verbose, "verbose", "v", o.Verbose, "show raw ffmpeg output during render")
 	f.StringVarP(&o.OutputDir, "output-dir", "o", o.OutputDir, "output directory (default: same as audio file)")
@@ -50,19 +52,42 @@ func (f bpmFlag) Set(s string) error {
 
 func (bpmFlag) Type() string { return "bpm" }
 
+// setArgs fills the audio and image paths from the positional arguments:
+// audio then images, or only images with --no-audio.
+func (o *renderOptions) setArgs(args []string) {
+	if o.NoAudio {
+		o.AudioPath, o.ImagePaths = "", args
+		return
+	}
+	o.AudioPath, o.ImagePaths = args[0], args[1:]
+}
+
+// minArgs is the fewest positional arguments a render needs.
+func (o *renderOptions) minArgs() int {
+	if o.NoAudio {
+		return 1
+	}
+	return 2
+}
+
 // styleCmd builds a subcommand that renders one style. The shared flags are
 // registered on it; extra registers the style's own flags.
-func styleCmd(s clipStyle, use, short, long string, args cobra.PositionalArgs, extra func(*cobra.Command, *renderOptions)) *cobra.Command {
+func styleCmd(s clipStyle, use, short, long string, extra func(*cobra.Command, *renderOptions)) *cobra.Command {
 	opts := defaultRenderOptions()
 	cmd := &cobra.Command{
 		Use:   use,
 		Short: short,
 		Long:  long,
-		Args:  args,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) < opts.minArgs() {
+				return fmt.Errorf("expected audio and image(s), or image(s) with --no-audio; got %d arg(s)", len(args))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 			opts.Style = s
-			opts.AudioPath, opts.ImagePaths = args[0], args[1:]
+			opts.setArgs(args)
 			return run(opts)
 		},
 	}
@@ -97,8 +122,11 @@ image twice in a row), every beat with --bpm or as set by --hold/--hold-beats:
   --tiles mixed   each tile shows a different image and switches on its own
                   sequence (all tiles switch at the same moments)
 
-Every run prints its --seed so a clip can be reproduced exactly.`,
-		cobra.MinimumNArgs(2),
+Every run prints its --seed so a clip can be reproduced exactly.
+
+With --no-audio, the silent clip loops seamlessly: one switch per image (the
+mixed tiles also differ from the first step at the loop point), or 3 seconds
+with a single image.`,
 		func(cmd *cobra.Command, o *renderOptions) {
 			cmd.Flags().IntVarP(&o.GridN, "n", "n", o.GridN, "tiles per side (1–12)")
 			cmd.Flags().StringVar(&o.Tiles, "tiles", o.Tiles, `with several images: "same" image in every tile, or "mixed"`)
@@ -123,8 +151,11 @@ line up along the track.
 
 With --bpm, one copy passes every --beats beats; otherwise --speed copies
 pass per second. --vanish moves the vanishing point to the right to fill more
-of the frame. The preset's wobble and grade are applied over the result.`,
-		cobra.MinimumNArgs(2),
+of the frame. The preset's wobble and grade are applied over the result.
+
+With --no-audio, the silent clip loops seamlessly: it lasts while one copy of
+each image passes (at least 3 seconds with a single image), with the speed
+nudged slightly so the loop is a whole number of frames.`,
 		func(cmd *cobra.Command, o *renderOptions) {
 			f := cmd.Flags()
 			f.IntVar(&o.Train.Copies, "copies", d.Copies, "copies on the track at once")

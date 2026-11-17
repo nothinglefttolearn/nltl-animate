@@ -29,6 +29,7 @@ go build -o nltl-animate ./cmd/nltl-animate/
 nltl-animate       <audio> <image> [image...] [flags]   # single (default style)
 nltl-animate grid  <audio> <image> [image...] [flags]
 nltl-animate train <audio> <image> [image...] [flags]
+nltl-animate --no-audio <image> [image...] [flags]      # silent loop, any style
 nltl-animate                                            # interactive: asks for everything
 ```
 
@@ -47,6 +48,22 @@ nltl-animate --config nltl.yaml --preset my-preset --bpm 138 demo.wav cover.jpg
 ```
 
 Output files are saved alongside the audio file (or in `--output-dir`), named after the track and the style: `demo_single.mp4`, `demo_cycle.mp4` (single with several images), `demo_grid4.mp4`, `demo_grid3_mixed.mp4`, `demo_train.mp4`, with `_preview` added for previews.
+
+### Silent loops (`--no-audio`)
+
+With `--no-audio` there is no audio file: every argument is an image, and the output is a silent clip that loops seamlessly when played on repeat. It works with every style, saved next to the first image as `{image}_{style}_loop.mp4`.
+
+- **Several images (single, grid):** the clip is one pass through the images. They are shuffled once (by `--seed`) and each is shown once, for `--hold`/`--hold-beats`, so playing it on repeat shows the same sequence over and over, with the loop point falling exactly on an image switch. With `--tiles mixed` there is one step per image, and every tile also changes image at the loop point.
+- **One image (single, grid):** 3 seconds, long enough for the preset's wandering motion.
+- **train:** as long as it takes one car per image to pass (at least 3 seconds with one image). The speed is nudged slightly so that is a whole number of frames, and the last frame leads straight back into the first.
+
+The preset's zoom and jitter are not matched up at the loop point; they are jumpy anyway. `--bpm <number>` still sets the tempo of the motion and switching; `--bpm auto` needs audio. `--preview` stops at 10 seconds, which cuts long loops short.
+
+```bash
+nltl-animate --no-audio cover.jpg                                    # 3s loop
+nltl-animate --no-audio --bpm 140 frames/*.png                       # one pass, an image per beat
+nltl-animate grid --no-audio --n 3 --tiles mixed --hold 10 frames/*.png
+```
 
 ## Styles
 
@@ -119,7 +136,8 @@ nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # a, b, c, a, b, 
 | `--preset` | `industrial` | Visual style |
 | `--bpm` | `0` | Track BPM for beat-synced animation, or `auto` to detect it (0 = time-based) |
 | `--preview` | `false` | Render 10s at low quality to check the look |
-| `--output-dir`, `-o` | same as audio | Where to write the output file |
+| `--no-audio` | `false` | No audio file: arguments are all images, output is a silent seamless loop |
+| `--output-dir`, `-o` | same as audio (or first image) | Where to write the output file |
 | `--still` | `false` | Disable zoom and jitter (brightness pulse stays) |
 | `--verbose`, `-v` | `false` | Show ffmpeg's output while rendering |
 | `--config`, `-c` | — | YAML file with custom presets |

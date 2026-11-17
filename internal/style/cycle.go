@@ -15,6 +15,9 @@ import (
 // frames), never the same image twice in a row. It implements
 // ffmpeg.FrameSource.
 type Cycle struct {
+	// Loop makes the sequence repeat: see LoopSequence.
+	Loop bool
+
 	w, h   int
 	images []*image.RGBA
 	hold   int
@@ -43,7 +46,11 @@ func NewCycle(imgs []*image.RGBA, hold int, seed uint64) (*Cycle, error) {
 func (c *Cycle) Size() (int, int) { return c.w, c.h }
 
 func (c *Cycle) WriteFrames(w io.Writer, n int) error {
-	for _, idx := range Sequence(len(c.images), n, c.hold, c.seed) {
+	seq := Sequence
+	if c.Loop {
+		seq = LoopSequence
+	}
+	for _, idx := range seq(len(c.images), n, c.hold, c.seed) {
 		if _, err := w.Write(c.images[idx].Pix); err != nil {
 			return err
 		}
@@ -72,6 +79,20 @@ func Sequence(nImages, nFrames, hold int, seed uint64) []int {
 			prev = next
 		}
 		seq[i] = prev
+	}
+	return seq
+}
+
+// LoopSequence is Sequence for a clip that loops: the images are shuffled
+// once and shown in that order, each for hold frames, over and over. One pass
+// is nImages*hold frames. Every image appears once per pass, so the last
+// differs from the first and the loop point looks like any other switch.
+func LoopSequence(nImages, nFrames, hold int, seed uint64) []int {
+	r := rand.New(rand.NewPCG(seed, 0x6e6c746c)) //nolint:gosec // visual randomness, not security
+	order := r.Perm(nImages)
+	seq := make([]int, nFrames)
+	for i := range seq {
+		seq[i] = order[(i/hold)%nImages]
 	}
 	return seq
 }

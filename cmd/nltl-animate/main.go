@@ -59,16 +59,20 @@ several images, switches between them at random (never the same image twice
 in a row), every beat with --bpm or as set by --hold/--hold-beats; every run
 prints its --seed so a clip can be reproduced exactly.
 
+With --no-audio, every argument is an image and the clip is silent and loops
+seamlessly: it lasts one pass through the images (each shown once, in a
+shuffled order that repeats), or 3 seconds with a single image.
+
 Other styles are subcommands (grid, train); every style takes one or more
 images. With no arguments, an interactive form asks for everything.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 && args[0] == "cycle" {
 				return errors.New("the cycle style is now the default: pass several images directly, e.g. nltl-animate song.wav a.png b.png")
 			}
-			if len(args) == 0 || len(args) >= 2 {
+			if len(args) == 0 || len(args) >= opts.minArgs() {
 				return nil
 			}
-			return fmt.Errorf("expected no args (interactive) or audio and image(s), got %d arg", len(args))
+			return fmt.Errorf("expected no args (interactive) or audio and image(s), got %d arg — pass --no-audio to make a silent loop from images alone", len(args))
 		},
 		Version: buildVersion(),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -76,9 +80,9 @@ images. With no arguments, an interactive form asks for everything.`,
 			// runtime failure (bad config, ffmpeg) and usage text is noise.
 			cmd.SilenceUsage = true
 
-			if len(args) >= 2 {
+			if len(args) > 0 {
 				opts.Style = styleSingle
-				opts.AudioPath, opts.ImagePaths = args[0], args[1:]
+				opts.setArgs(args)
 				return run(opts)
 			}
 			return runInteractive(opts)
@@ -100,6 +104,7 @@ func runInteractive(opts renderOptions) error {
 		return err
 	}
 	choices, err := interactive.Run(interactive.Defaults{
+		NoAudio:       opts.NoAudio,
 		PresetName:    opts.PresetName,
 		BPM:           opts.BPM,
 		AutoBPM:       opts.AutoBPM,
@@ -113,6 +118,7 @@ func runInteractive(opts renderOptions) error {
 	}
 	opts.Style = clipStyle(choices.Style)
 	opts.AudioPath = choices.AudioPath
+	opts.NoAudio = choices.AudioPath == ""
 	opts.ImagePaths = choices.ImagePaths
 	opts.PresetName = choices.PresetName
 	opts.BPM, opts.AutoBPM = choices.BPM, choices.AutoBPM

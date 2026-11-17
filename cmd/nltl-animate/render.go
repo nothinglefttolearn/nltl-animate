@@ -36,11 +36,16 @@ const (
 // over time and neither --hold, --hold-beats nor --bpm is given (0.5 s).
 const defaultHoldFrames = 15
 
+// oneImageLoopSeconds is how long a silent loop of a single image lasts:
+// long enough for the preset's wandering motion to read as movement.
+const oneImageLoopSeconds = 3
+
 // renderOptions is everything needed to render one clip. It is filled from
 // flags, and in interactive mode the TUI overrides the fields it asks about.
 type renderOptions struct {
 	Style      clipStyle
-	AudioPath  string
+	AudioPath  string   // empty with NoAudio
+	NoAudio    bool     // silent clip that loops seamlessly (see loopFrames)
 	ImagePaths []string // one or more
 	PresetName string
 	BPM        int
@@ -118,6 +123,9 @@ func (o *renderOptions) validate() error {
 	if o.BPM < 0 {
 		return fmt.Errorf("--bpm must be positive (or 0 for time-based animation), got %d", o.BPM)
 	}
+	if o.NoAudio && o.AutoBPM {
+		return errors.New("--bpm auto needs an audio track — pass --bpm <number> with --no-audio")
+	}
 
 	if len(o.ImagePaths) == 0 {
 		return fmt.Errorf("%s style needs at least 1 image", o.Style)
@@ -189,13 +197,17 @@ func (o *renderOptions) holdFrames() int {
 
 // outputPath is {track}_{style}[_detail][_preview].mp4 next to the audio (or
 // in --output-dir). The style is always named, so the output can never
-// overwrite the audio file itself (e.g. an .mp4 soundtrack).
+// overwrite the audio file itself (e.g. an .mp4 soundtrack). Without audio it
+// is named after the first image and ends in _loop.
 func (o *renderOptions) outputPath() string {
-	audio := o.AudioPath
-	base := strings.TrimSuffix(filepath.Base(audio), filepath.Ext(audio))
+	named := o.AudioPath
+	if o.NoAudio {
+		named = o.ImagePaths[0]
+	}
+	base := strings.TrimSuffix(filepath.Base(named), filepath.Ext(named))
 	dir := o.OutputDir
 	if dir == "" {
-		dir = filepath.Dir(audio)
+		dir = filepath.Dir(named)
 	}
 
 	var suffix string
@@ -213,10 +225,31 @@ func (o *renderOptions) outputPath() string {
 	default:
 		suffix = string(o.Style)
 	}
+	if o.NoAudio {
+		suffix += "_loop"
+	}
 	if o.Preview {
 		suffix += "_preview"
 	}
 	return filepath.Join(dir, fmt.Sprintf("%s_%s.mp4", base, suffix))
+}
+
+// loopFrames is the length of a silent clip, chosen so it loops seamlessly:
+// one pass through the image sequence (each image once, or for train one
+// image cycle of the cars), or oneImageLoopSeconds with a single image. The
+// preset's wobble is not matched up at the loop point; it is jumpy anyway.
+func (o *renderOptions) loopFrames() int {
+	oneImage := oneImageLoopSeconds * video.FPS
+	switch {
+	case o.Style == styleTrain && len(o.ImagePaths) > 1:
+		return style.TrainLoopFrames(o.Train, len(o.ImagePaths), 0)
+	case o.Style == styleTrain:
+		return style.TrainLoopFrames(o.Train, 1, oneImage)
+	case o.switches():
+		return len(o.ImagePaths) * o.holdFrames()
+	default:
+		return oneImage
+	}
 }
 
 // videoInput returns the ffmpeg video input (still image or frame source)
@@ -237,6 +270,7 @@ func (o *renderOptions) videoInput(p preset.Preset) (ffmpeg.Options, error) {
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
+		src.Loop = o.NoAudio
 		return ffmpeg.Options{Frames: src, Filter: style.MosaicFilter(p, w, h, o.GridN, o.BPM)}, nil
 
 	case o.Style == styleGrid: // same image in every tile, switching together
@@ -249,6 +283,7 @@ func (o *renderOptions) videoInput(p preset.Preset) (ffmpeg.Options, error) {
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
+		src.Loop = o.NoAudio
 		return ffmpeg.Options{Frames: src, Filter: style.GridFilter(p, w, h, o.GridN, o.BPM)}, nil
 
 	case o.Style == styleSingle && o.switches():
@@ -260,6 +295,7 @@ func (o *renderOptions) videoInput(p preset.Preset) (ffmpeg.Options, error) {
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
+		src.Loop = o.NoAudio
 		return ffmpeg.Options{Frames: src, Filter: p.BuildFilter(w, h, o.BPM)}, nil
 
 	case o.Style == styleTrain:
@@ -273,7 +309,11 @@ func (o *renderOptions) videoInput(p preset.Preset) (ffmpeg.Options, error) {
 			}
 			imgs = append(imgs, frames.ToRGBA(img))
 		}
-		src, err := style.NewTrain(imgs, w, h, o.Train)
+		train := o.Train
+		if o.NoAudio {
+			train.LoopFrames = o.loopFrames()
+		}
+		src, err := style.NewTrain(imgs, w, h, train)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
@@ -366,6 +406,9 @@ func (o *renderOptions) headlessCommand() string {
 	if o.Preview {
 		parts = append(parts, "--preview")
 	}
+	if o.NoAudio {
+		parts = append(parts, "--no-audio")
+	}
 	if o.ConfigPath != "" {
 		parts = append(parts, "--config", o.ConfigPath)
 	}
@@ -400,7 +443,9 @@ func (o *renderOptions) headlessCommand() string {
 		flagIf(o.TrainBG != d.TrainBG, "--bg", o.TrainBG)
 	}
 
-	parts = append(parts, o.AudioPath)
+	if !o.NoAudio {
+		parts = append(parts, o.AudioPath)
+	}
 	parts = append(parts, o.ImagePaths...)
 	return strings.Join(parts, " ")
 }
@@ -447,9 +492,12 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 		p.ZoomBase = 1.0
 	}
 
-	duration, err := ffmpeg.GetDuration(o.AudioPath)
-	if err != nil {
-		return fmt.Errorf("reading audio duration: %w", err)
+	var duration float64
+	if !o.NoAudio {
+		duration, err = ffmpeg.GetDuration(o.AudioPath)
+		if err != nil {
+			return fmt.Errorf("reading audio duration: %w", err)
+		}
 	}
 
 	ff, err := o.videoInput(p)
@@ -459,6 +507,9 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	ff.AudioPath = o.AudioPath
 	ff.OutputPath = o.outputPath()
 	ff.Duration = duration
+	if o.NoAudio {
+		ff.NumFrames = o.loopFrames()
+	}
 	ff.Preview = o.Preview
 	ff.Verbose = o.Verbose
 
@@ -473,6 +524,10 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 			bpm += labelStyle.Render(" (detected — pass --bpm to override)")
 		}
 		fmt.Println(label("BPM") + valueStyle.Render(bpm))
+	}
+	if o.NoAudio {
+		fmt.Println(label("Loop") + valueStyle.Render(fmt.Sprintf("%ss (%d frames), no audio",
+			strconv.FormatFloat(float64(ff.NumFrames)/video.FPS, 'f', 2, 64), ff.NumFrames)))
 	}
 	if o.Preview {
 		fmt.Println(label("Preview") + valueStyle.Render(fmt.Sprintf("%ds low-quality render", video.PreviewSeconds)))

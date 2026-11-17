@@ -27,6 +27,8 @@ Every style takes one or more images. `ffmpeg.Render` has two video input kinds:
 - a still image looped with `-loop 1` (`single` and `grid` with one image); `grid` is a pure filtergraph (`style.GridFilter`: motion at tile size → split → xstack → grade);
 - a raw RGBA frame stream on stdin from an `ffmpeg.FrameSource`, rendered in Go in `internal/style`: `Cycle` (single with several images, or grid `--tiles same` at tile size under `GridFilter`) picks a pre-cropped image per frame; `Mosaic` (grid `--tiles mixed`) composes the whole grid with a separate sequence per tile, and `style.MosaicFilter` crops each tile back out to give it the same motion; `Train` projects camera-facing billboards onto a perspective track, renders frames in parallel, writes them in order. The preset's filter runs over these frames too.
 
+`--no-audio` makes a silent clip of exactly `renderOptions.loopFrames()` frames (`ffmpeg.Options.NumFrames`, rendered with `-frames:v`) that loops seamlessly: one pass of a shuffled image order (`style.LoopSequence`, `MosaicLoopSequence`), whole image cycles of the train (`TrainOptions.LoopFrames` nudges the speed to fit), or 3 s for a single image. The preset's wobble is not matched up at the loop point.
+
 `--bpm auto` decodes the audio to mono PCM (`ffmpeg.DecodeMono`) and estimates a whole-number tempo in `internal/tempo` (onset envelope → autocorrelation → beat-grid fit).
 
 `internal/frames` decodes and cover-crops images; `internal/video` holds the shared frame rate and preview length.

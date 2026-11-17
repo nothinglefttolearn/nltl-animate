@@ -111,3 +111,50 @@ func TestNewCycleErrors(t *testing.T) {
 		t.Error("expected error for mismatched sizes")
 	}
 }
+
+func TestLoopSequenceRepeatsEachImageOncePerPass(t *testing.T) {
+	const nImages, hold = 5, 3
+	pass := nImages * hold
+	s := LoopSequence(nImages, 3*pass, hold, 9)
+	if !slices.Equal(s, LoopSequence(nImages, 3*pass, hold, 9)) {
+		t.Fatal("same seed gave different sequences")
+	}
+	if !slices.Equal(s[:pass], s[pass:2*pass]) || !slices.Equal(s[:pass], s[2*pass:]) {
+		t.Fatalf("passes differ: %v", s)
+	}
+	seen := map[int]bool{}
+	for i := range pass {
+		if i%hold != 0 && s[i] != s[i-1] {
+			t.Fatalf("frame %d switches mid-hold: %v", i, s)
+		}
+		seen[s[i]] = true
+	}
+	if len(seen) != nImages {
+		t.Errorf("a pass shows %d of %d images: %v", len(seen), nImages, s[:pass])
+	}
+	if s[pass-1] == s[0] {
+		t.Errorf("loop point repeats image %d", s[0])
+	}
+}
+
+func TestCycleLoopWritesLoopSequence(t *testing.T) {
+	imgs := []*image.RGBA{
+		solid(2, 2, color.RGBA{R: 1, A: 255}),
+		solid(2, 2, color.RGBA{R: 2, A: 255}),
+		solid(2, 2, color.RGBA{R: 3, A: 255}),
+	}
+	c, err := NewCycle(imgs, 2, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Loop = true
+	var buf bytes.Buffer
+	if err := c.WriteFrames(&buf, 12); err != nil {
+		t.Fatal(err)
+	}
+	for i, idx := range LoopSequence(3, 12, 2, 4) {
+		if got := int(buf.Bytes()[i*16]); got != idx+1 {
+			t.Fatalf("frame %d shows image %d, want %d", i, got-1, idx)
+		}
+	}
+}

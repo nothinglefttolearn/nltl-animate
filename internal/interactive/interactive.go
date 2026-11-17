@@ -33,7 +33,7 @@ const (
 // Choices holds what the user picked in the form.
 type Choices struct {
 	Style      string
-	AudioPath  string
+	AudioPath  string // empty for a silent loop
 	ImagePaths []string
 	PresetName string
 	BPM        int
@@ -46,6 +46,7 @@ type Choices struct {
 // Defaults pre-fills the form (typically from command-line flags) and supplies
 // custom presets loaded from --config so they can be picked alongside built-ins.
 type Defaults struct {
+	NoAudio       bool
 	PresetName    string
 	BPM           int
 	AutoBPM       bool
@@ -60,10 +61,6 @@ func Run(d Defaults) (*Choices, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(audioFiles) == 0 {
-		return nil, errors.New("no audio files found in current directory")
-	}
-
 	imageFiles, err := scanFiles(imageExts)
 	if err != nil {
 		return nil, err
@@ -76,7 +73,7 @@ func Run(d Defaults) (*Choices, error) {
 
 	var (
 		styleName  = StyleSingle
-		audioPath  = audioFiles[0]
+		audioPath  = ""
 		imagePaths []string
 		tiles      = orFirst(d.Tiles, []string{"same", "mixed"})
 		gridStr    = strconv.Itoa(max(1, d.GridN))
@@ -93,6 +90,9 @@ func Run(d Defaults) (*Choices, error) {
 	if len(imageFiles) == 1 {
 		imagePaths = imageFiles
 	}
+	if len(audioFiles) > 0 && !d.NoAudio {
+		audioPath = audioFiles[0]
+	}
 	isNot := func(s string) func() bool { return func() bool { return styleName != s } }
 
 	form := huh.NewForm(
@@ -103,7 +103,7 @@ func Run(d Defaults) (*Choices, error) {
 				Value(&styleName),
 			huh.NewSelect[string]().
 				Title("Audio file").
-				Options(fileOptions(audioFiles)...).
+				Options(audioOptions(audioFiles)...).
 				Value(&audioPath),
 		),
 		huh.NewGroup(
@@ -141,7 +141,12 @@ func Run(d Defaults) (*Choices, error) {
 				Title("BPM").
 				Description("Tempo-synced animations — \"auto\" detects it, blank disables").
 				Placeholder("e.g. 140, or auto").
-				Validate(validateBPM).
+				Validate(func(s string) error {
+					if s == "auto" && audioPath == "" {
+						return errors.New(`"auto" needs an audio file — enter a number or leave blank`)
+					}
+					return validateBPM(s)
+				}).
 				Value(&bpmStr),
 			huh.NewConfirm().
 				Title("Disable motion effects?").
@@ -212,6 +217,11 @@ func scanFiles(exts map[string]bool) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// audioOptions lists the audio files, then a silent loop (value "").
+func audioOptions(files []string) []huh.Option[string] {
+	return append(fileOptions(files), huh.NewOption("none — silent clip that loops seamlessly", ""))
 }
 
 func fileOptions(files []string) []huh.Option[string] {

@@ -29,6 +29,11 @@ type TrainOptions struct {
 	Vanish  float64 // horizontal position of the vanishing point, 0 = left edge, 1 = right edge
 	BG      color.RGBA
 	Fog     float64 // 0 = none, 1 = the farthest copies fully dissolve into BG
+
+	// LoopFrames, when > 0, makes the train repeat exactly every LoopFrames
+	// frames: the speed is nudged so a whole number of image cycles pass in
+	// that time. See TrainLoopFrames.
+	LoopFrames int
 }
 
 func DefaultTrainOptions() TrainOptions {
@@ -73,7 +78,29 @@ func (o TrainOptions) Validate() error {
 	if o.Fog < 0 || o.Fog > 1 {
 		errs = append(errs, fmt.Errorf("fog must be between 0 and 1, got %g", o.Fog))
 	}
+	if o.LoopFrames < 0 {
+		errs = append(errs, fmt.Errorf("loop frames must be >= 0, got %d", o.LoopFrames))
+	}
 	return errors.Join(errs...)
+}
+
+// PassesPerSecond is how many copies pass the viewer each second.
+func (o TrainOptions) PassesPerSecond() float64 {
+	if o.BPM > 0 {
+		return float64(o.BPM) / 60 / o.Beats
+	}
+	return o.Speed
+}
+
+// TrainLoopFrames is the length of a seamless loop of a train of nImages:
+// the time for nImages copies to pass (the cars then show the same images in
+// the same places again), repeated until it lasts at least minFrames, and
+// rounded to whole frames. Pass it as LoopFrames.
+func TrainLoopFrames(o TrainOptions, nImages, minFrames int) int {
+	perSecond := o.PassesPerSecond()
+	cycleFrames := float64(nImages) * video.FPS / perSecond
+	cycles := max(1, math.Ceil(float64(minFrames)/cycleFrames-1e-9))
+	return max(1, int(math.Round(cycles*cycleFrames)))
 }
 
 // fadeInFraction is the far share of the track over which copies fade in,
@@ -154,9 +181,13 @@ func NewTrain(imgs []image.Image, w, h int, opts TrainOptions) (*Train, error) {
 		t.imgs[i].mips = mips
 	}
 
-	perSecond := opts.Speed
-	if opts.BPM > 0 {
-		perSecond = float64(opts.BPM) / 60 / opts.Beats
+	perSecond := opts.PassesPerSecond()
+	if opts.LoopFrames > 0 {
+		// Round to a whole number of image cycles in the loop, so frame
+		// LoopFrames is identical to frame 0.
+		loopSec := float64(opts.LoopFrames) / video.FPS
+		n := float64(len(imgs))
+		perSecond = max(1, math.Round(loopSec*perSecond/n)) * n / loopSec
 	}
 	t.velocity = perSecond * opts.Spacing
 	return t, nil

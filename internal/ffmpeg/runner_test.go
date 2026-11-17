@@ -99,6 +99,46 @@ func TestRenderSuccessAndArgs(t *testing.T) {
 	}
 }
 
+func TestRenderSilentFrameCount(t *testing.T) {
+	dir := t.TempDir()
+	argsFile, countFile := filepath.Join(dir, "args"), filepath.Join(dir, "count")
+	fakeTool(t, "ffmpeg", `printf '%s\n' "$@" > `+argsFile+"\nwc -c > "+countFile+"\n")
+
+	err := Render(Options{Frames: solidFrames{w: 2, h: 2}, OutputPath: "o.mp4", Filter: "null", NumFrames: 7})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	raw, _ := os.ReadFile(countFile)
+	if got := strings.TrimSpace(string(raw)); got != strconv.Itoa(7*2*2*4) {
+		t.Errorf("ffmpeg read %s bytes, want 7 frames", got)
+	}
+	rawArgs, _ := os.ReadFile(argsFile)
+	args := strings.Join(strings.Fields(string(rawArgs)), " ")
+	if !strings.Contains(args, "-frames:v 7") {
+		t.Errorf("args missing -frames:v 7: %s", args)
+	}
+	for _, unwanted := range []string{"1:a", "-c:a", "-shortest", "-t "} {
+		if strings.Contains(args, unwanted) {
+			t.Errorf("silent render has %q: %s", unwanted, args)
+		}
+	}
+	if strings.Count(args, "-i ") != 1 {
+		t.Errorf("silent render should have one input: %s", args)
+	}
+}
+
+func TestRenderSilentPreviewIsCapped(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	fakeTool(t, "ffmpeg", `printf '%s\n' "$@" > `+argsFile+"\n")
+	if err := Render(Options{ImagePath: "i.jpg", OutputPath: "o.mp4", Filter: "null", NumFrames: 3000, Preview: true}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	raw, _ := os.ReadFile(argsFile)
+	if args := strings.Join(strings.Fields(string(raw)), " "); !strings.Contains(args, "-frames:v 300") {
+		t.Errorf("preview should stop at 300 frames: %s", args)
+	}
+}
+
 // solidFrames is a FrameSource of identical frames.
 type solidFrames struct {
 	w, h int

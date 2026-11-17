@@ -15,6 +15,10 @@ import (
 // It implements ffmpeg.FrameSource; frames are n tiles wide and high, with
 // no gaps (see MosaicFilter for the per-tile motion).
 type Mosaic struct {
+	// Loop makes the grid repeat after one step per image: see
+	// MosaicLoopSequence.
+	Loop bool
+
 	n      int
 	tw, th int
 	images []*image.RGBA
@@ -47,10 +51,15 @@ func (m *Mosaic) Size() (int, int) { return m.n * m.tw, m.n * m.th }
 func (m *Mosaic) WriteFrames(w io.Writer, n int) error {
 	fw, fh := m.Size()
 	frame := image.NewRGBA(image.Rect(0, 0, fw, fh))
-	steps := MosaicSequence(len(m.images), m.n*m.n, (n+m.hold-1)/m.hold, m.seed)
+	var steps [][]int
+	if m.Loop {
+		steps = MosaicLoopSequence(len(m.images), m.n*m.n, m.seed)
+	} else {
+		steps = MosaicSequence(len(m.images), m.n*m.n, (n+m.hold-1)/m.hold, m.seed)
+	}
 	for i := range n {
 		if i%m.hold == 0 {
-			m.compose(frame, steps[i/m.hold])
+			m.compose(frame, steps[(i/m.hold)%len(steps)])
 		}
 		if _, err := w.Write(frame.Pix); err != nil {
 			return err
@@ -78,46 +87,67 @@ func (m *Mosaic) compose(frame *image.RGBA, tiles []int) {
 // possible across the tiles at every step: all different when
 // nImages >= nTiles. The same seed always gives the same sequence.
 func MosaicSequence(nImages, nTiles, nSteps int, seed uint64) [][]int {
+	return mosaicSteps(nImages, nTiles, nSteps, false, seed)
+}
+
+// MosaicLoopSequence is MosaicSequence for a clip that loops: nImages steps,
+// after which it starts again from the first. The last step also differs
+// from the first in every tile, so the loop point looks like any other
+// switch.
+func MosaicLoopSequence(nImages, nTiles int, seed uint64) [][]int {
+	return mosaicSteps(nImages, nTiles, nImages, true, seed)
+}
+
+func mosaicSteps(nImages, nTiles, nSteps int, loop bool, seed uint64) [][]int {
 	r := rand.New(rand.NewPCG(seed, 0x6d6f7361)) //nolint:gosec // visual randomness, not security
 	steps := make([][]int, nSteps)
 	var prev []int
 	for s := range steps {
-		steps[s] = dealTiles(r, nImages, nTiles, prev)
+		var next []int
+		if loop && s > 0 && s == nSteps-1 {
+			next = steps[0]
+		}
+		steps[s] = dealTiles(r, nImages, nTiles, prev, next)
 		prev = steps[s]
 	}
 	return steps
 }
 
 // dealTiles deals images to tiles from shuffled decks, then repairs any tile
-// that drew its previous image by swapping with a tile that can take it.
-func dealTiles(r *rand.Rand, nImages, nTiles int, prev []int) []int {
+// that drew the image it shows in the step before (prev) or after (next) by
+// swapping with a tile that can take it. Either may be nil.
+func dealTiles(r *rand.Rand, nImages, nTiles int, prev, next []int) []int {
 	deal := make([]int, 0, nTiles+nImages)
 	for len(deal) < nTiles {
 		deal = append(deal, r.Perm(nImages)...)
 	}
 	deal = deal[:nTiles]
-	if prev == nil {
-		return deal
+	clashes := func(tile, img int) bool {
+		return (prev != nil && prev[tile] == img) || (next != nil && next[tile] == img)
 	}
 	for i := range deal {
-		if deal[i] != prev[i] {
+		if !clashes(i, deal[i]) {
 			continue
 		}
 		swapped := false
 		for _, j := range r.Perm(nTiles) {
-			if j != i && deal[j] != prev[i] && deal[i] != prev[j] {
+			if j != i && !clashes(i, deal[j]) && !clashes(j, deal[i]) {
 				deal[i], deal[j] = deal[j], deal[i]
 				swapped = true
 				break
 			}
 		}
 		if !swapped {
-			// No swap works (e.g. a single tile): pick any other image.
-			next := r.IntN(nImages - 1)
-			if next >= prev[i] {
-				next++
+			// No swap works (e.g. a single tile): pick any image that fits.
+			// There is always one: next is only set with 3+ images, or
+			// equal to prev.
+			var fits []int
+			for img := range nImages {
+				if !clashes(i, img) {
+					fits = append(fits, img)
+				}
 			}
-			deal[i] = next
+			deal[i] = fits[r.IntN(len(fits))]
 		}
 	}
 	return deal

@@ -14,6 +14,53 @@ import (
 	"testing"
 )
 
+// probe returns ffprobe's stream and format info for path.
+func probe(t *testing.T, path string) string {
+	t.Helper()
+	out, err := exec.Command("ffprobe", "-v", "error", "-count_frames",
+		"-show_entries", "stream=codec_type,width,height,nb_read_frames:format=duration",
+		"-of", "default=noprint_wrappers=1", path).Output()
+	if err != nil {
+		t.Fatalf("ffprobe %s: %v", path, err)
+	}
+	return string(out)
+}
+
+func TestIntegrationNoAudioLoops(t *testing.T) {
+	dir := t.TempDir()
+	red := writePNG(t, dir, "red.png", color.RGBA{R: 255, A: 255})
+	blue := writePNG(t, dir, "blue.png", color.RGBA{B: 255, A: 255})
+	half := writePNG(t, dir, "half.png", color.RGBA{G: 128, A: 128})
+
+	tests := []struct {
+		name   string
+		args   []string
+		out    string
+		frames int
+	}{
+		{"one image", []string{red}, "red_single_loop.mp4", 90},
+		{"several images", []string{"--hold", "5", red, blue, half}, "red_cycle_loop.mp4", 15},
+		{"grid mixed", []string{"grid", "--n", "2", "--tiles", "mixed", "--hold", "3", red, blue, half}, "red_grid2_mixed_loop.mp4", 9},
+		{"train", []string{"train", "--bpm", "138", red, half}, "red_train_loop.mp4", 26},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newRootCmd()
+			cmd.SetArgs(append(tt.args, "--no-audio", "-o", dir))
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			info := probe(t, filepath.Join(dir, tt.out))
+			if strings.Contains(info, "codec_type=audio") {
+				t.Errorf("%s has an audio stream:\n%s", tt.out, info)
+			}
+			if want := "nb_read_frames=" + strconv.Itoa(tt.frames); !strings.Contains(info, want) {
+				t.Errorf("%s: missing %q in\n%s", tt.out, want, info)
+			}
+		})
+	}
+}
+
 func TestIntegrationRenderEveryStyle(t *testing.T) {
 	dir := t.TempDir()
 	audio := filepath.Join(dir, "tone.wav")

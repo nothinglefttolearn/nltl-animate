@@ -36,6 +36,7 @@ type Options struct {
 	// Frames, when set, supplies every video frame at video.FPS.
 	Frames FrameSource
 
+	// AudioPath is the soundtrack. Without one the clip is silent.
 	AudioPath  string
 	OutputPath string
 	// Filter is a filtergraph applied to the video input. It may contain
@@ -43,8 +44,11 @@ type Options struct {
 	// one unlabelled input and output; Render adds the [0:v] and [v] labels.
 	Filter   string
 	Duration float64
-	Preview  bool
-	Verbose  bool
+	// NumFrames, when > 0, sets the clip length in frames exactly, in place
+	// of Duration (e.g. a silent clip made to loop).
+	NumFrames int
+	Preview   bool
+	Verbose   bool
 }
 
 func GetDuration(audioPath string) (float64, error) {
@@ -101,8 +105,15 @@ func Render(opts Options) error {
 	if opts.Preview && duration > video.PreviewSeconds {
 		duration = video.PreviewSeconds
 	}
+	nFrames := video.FrameCount(duration)
+	if opts.NumFrames > 0 {
+		nFrames = opts.NumFrames
+		if opts.Preview {
+			nFrames = min(nFrames, video.PreviewSeconds*video.FPS)
+		}
+	}
 
-	cmd := exec.Command("ffmpeg", buildArgs(opts, duration)...)
+	cmd := exec.Command("ffmpeg", buildArgs(opts, duration, nFrames)...)
 
 	run := cmd.Run
 	if opts.Frames != nil {
@@ -110,7 +121,7 @@ func Render(opts Options) error {
 		if err != nil {
 			return fmt.Errorf("ffmpeg stdin: %w", err)
 		}
-		run = func() error { return runWithFrames(cmd, stdin, opts.Frames, video.FrameCount(duration)) }
+		run = func() error { return runWithFrames(cmd, stdin, opts.Frames, nFrames) }
 	}
 
 	if opts.Verbose {
@@ -131,7 +142,9 @@ func Render(opts Options) error {
 	return nil
 }
 
-func buildArgs(opts Options, duration float64) []string {
+// buildArgs limits the clip to nFrames frames when opts.NumFrames is set,
+// else to duration seconds.
+func buildArgs(opts Options, duration float64, nFrames int) []string {
 	args := []string{"-y", "-hide_banner"}
 	if !opts.Verbose {
 		// Only errors on stderr, so what we capture is the useful part.
@@ -151,13 +164,18 @@ func buildArgs(opts Options, duration float64) []string {
 		args = append(args, "-loop", "1", "-i", opts.ImagePath)
 	}
 
+	hasAudio := opts.AudioPath != ""
+	if hasAudio {
+		args = append(args, "-i", opts.AudioPath)
+	}
 	args = append(args,
-		"-i", opts.AudioPath,
 		"-filter_complex", "[0:v]"+opts.Filter+"[v]",
 		"-map", "[v]",
-		"-map", "1:a",
-		"-c:v", "libx264",
 	)
+	if hasAudio {
+		args = append(args, "-map", "1:a")
+	}
+	args = append(args, "-c:v", "libx264")
 
 	switch {
 	case opts.Preview:
@@ -168,15 +186,20 @@ func buildArgs(opts Options, duration float64) []string {
 		args = append(args, "-crf", "18")
 	}
 
-	return append(args,
-		"-pix_fmt", "yuv420p",
-		"-c:a", "aac",
-		"-b:a", "192k",
-		"-r", strconv.Itoa(video.FPS),
-		"-t", fmt.Sprintf("%.3f", duration),
-		"-shortest",
-		opts.OutputPath,
-	)
+	args = append(args, "-pix_fmt", "yuv420p")
+	if hasAudio {
+		args = append(args, "-c:a", "aac", "-b:a", "192k")
+	}
+	args = append(args, "-r", strconv.Itoa(video.FPS))
+	if opts.NumFrames > 0 {
+		args = append(args, "-frames:v", strconv.Itoa(nFrames))
+	} else {
+		args = append(args, "-t", fmt.Sprintf("%.3f", duration))
+	}
+	if hasAudio {
+		args = append(args, "-shortest")
+	}
+	return append(args, opts.OutputPath)
 }
 
 // runWithFrames starts ffmpeg, streams n frames into its stdin and waits.

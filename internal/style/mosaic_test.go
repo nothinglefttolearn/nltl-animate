@@ -146,3 +146,53 @@ func TestMosaicFilter(t *testing.T) {
 		t.Error("1x1 should be the plain filter")
 	}
 }
+
+func TestMosaicLoopSequenceWrapsCleanly(t *testing.T) {
+	for _, c := range []struct{ images, tiles int }{{2, 9}, {3, 1}, {3, 4}, {5, 4}, {9, 9}, {4, 16}} {
+		for seed := range uint64(30) {
+			steps := MosaicLoopSequence(c.images, c.tiles, seed)
+			if len(steps) != c.images {
+				t.Fatalf("%+v: %d steps, want one per image", c, len(steps))
+			}
+			for s := range steps {
+				prev := steps[(s+len(steps)-1)%len(steps)] // the last step precedes the first
+				for tile, img := range steps[s] {
+					if img < 0 || img >= c.images {
+						t.Fatalf("%+v seed %d: image %d out of range", c, seed, img)
+					}
+					if img == prev[tile] {
+						t.Fatalf("%+v seed %d: tile %d keeps image %d into step %d", c, seed, tile, img, s)
+					}
+				}
+				if c.images >= c.tiles {
+					if u := slices.Compact(slices.Sorted(slices.Values(steps[s]))); len(u) != c.tiles {
+						t.Errorf("%+v seed %d step %d: tiles repeat an image: %v", c, seed, s, steps[s])
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestMosaicLoopWriteFramesRepeats(t *testing.T) {
+	imgs := []*image.RGBA{
+		solid(1, 1, color.RGBA{R: 1, A: 255}),
+		solid(1, 1, color.RGBA{R: 2, A: 255}),
+		solid(1, 1, color.RGBA{R: 3, A: 255}),
+	}
+	m, err := NewMosaic(imgs, 2, 2, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Loop = true
+	var buf bytes.Buffer
+	const pass = 3 * 2 // one step per image, 2 frames each
+	if err := m.WriteFrames(&buf, 2*pass); err != nil {
+		t.Fatal(err)
+	}
+	frame := 2 * 2 * 4
+	b := buf.Bytes()
+	if !bytes.Equal(b[:pass*frame], b[pass*frame:]) {
+		t.Error("second pass differs from the first")
+	}
+}

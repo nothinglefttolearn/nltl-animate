@@ -48,6 +48,8 @@ func TestValidate(t *testing.T) {
 		{"grid bad tiles", func(o *renderOptions) { o.Style, o.Tiles = styleGrid, "random" }, "--tiles"},
 		{"train bad bg", func(o *renderOptions) { o.Style, o.TrainBG = styleTrain, "red" }, "--bg"},
 		{"train bad option", func(o *renderOptions) { o.Style, o.Train.Fog = styleTrain, 3 }, "fog"},
+		{"no audio", func(o *renderOptions) { o.NoAudio, o.AudioPath, o.BPM = true, "", 120 }, ""},
+		{"no audio auto bpm", func(o *renderOptions) { o.NoAudio, o.AudioPath, o.AutoBPM = true, "", true }, "needs an audio track"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,7 +98,13 @@ func TestOutputPath(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", o.Style, got, c.want)
 		}
 	}
-	o := opts(styleSingle, "i")
+	o := opts(styleGrid, "/art/a.png", "/art/b.png")
+	o.NoAudio, o.AudioPath, o.Tiles = true, "", tilesMixed
+	if got := o.outputPath(); got != filepath.Join("/art", "a_grid3_mixed_loop.mp4") {
+		t.Errorf("no audio: got %q", got)
+	}
+
+	o = opts(styleSingle, "i")
 	o.AudioPath = "/music/song.mp4"
 	if got := o.outputPath(); got == o.AudioPath {
 		t.Errorf("output %q would overwrite the audio", got)
@@ -351,5 +359,108 @@ func TestCLIArgErrors(t *testing.T) {
 		if err := cmd.Execute(); err == nil {
 			t.Errorf("nltl-animate %v: expected an argument error", args)
 		}
+	}
+}
+
+func TestLoopFrames(t *testing.T) {
+	cases := []struct {
+		name string
+		mod  func(*renderOptions)
+		want int
+	}{
+		{"one image", func(o *renderOptions) {}, 90},
+		{"grid one image", func(o *renderOptions) { o.Style = styleGrid }, 90},
+		{"several images", func(o *renderOptions) { o.ImagePaths = []string{"a", "b", "c"} }, 3 * defaultHoldFrames},
+		{"several images at a bpm", func(o *renderOptions) { o.ImagePaths, o.BPM = []string{"a", "b"}, 120 }, 2 * 15},
+		{"grid mixed", func(o *renderOptions) {
+			o.Style, o.ImagePaths, o.Tiles, o.Hold = styleGrid, []string{"a", "b", "c", "d"}, tilesMixed, 2
+		}, 4 * 2},
+		{"train one image", func(o *renderOptions) { o.Style = styleTrain }, 100},
+		{"train several images", func(o *renderOptions) { o.Style, o.ImagePaths = styleTrain, []string{"a", "b"} }, 40},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o := opts(styleSingle, "i.png")
+			o.NoAudio, o.AudioPath = true, ""
+			c.mod(&o)
+			if err := o.validate(); err != nil {
+				t.Fatal(err)
+			}
+			if got := o.loopFrames(); got != c.want {
+				t.Errorf("loopFrames = %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+func TestCLINoAudio(t *testing.T) {
+	dir := t.TempDir()
+	red := writePNG(t, dir, "red.png", color.RGBA{R: 255, A: 255})
+	blue := writePNG(t, dir, "blue.png", color.RGBA{B: 255, A: 255})
+	green := writePNG(t, dir, "green.png", color.RGBA{G: 255, A: 255})
+	silent := func(t *testing.T, args []string, frames string) {
+		t.Helper()
+		if got := argAfter(args, "-frames:v"); got != frames {
+			t.Errorf("-frames:v = %q, want %s: %v", got, frames, args)
+		}
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "1:a") || strings.Contains(joined, "-c:a") {
+			t.Errorf("silent clip maps audio: %v", args)
+		}
+	}
+
+	t.Run("one image", func(t *testing.T) {
+		args, _ := runCLI(t, "--no-audio", red)
+		silent(t, args, "90")
+		if argAfter(args, "-i") != red {
+			t.Errorf("single should loop the still image: %v", args)
+		}
+		if out := args[len(args)-1]; out != filepath.Join(dir, "red_single_loop.mp4") {
+			t.Errorf("output = %s", out)
+		}
+	})
+
+	t.Run("several images", func(t *testing.T) {
+		args, stdin := runCLI(t, "--no-audio", "--hold", "4", "--seed", "3", red, blue, green)
+		silent(t, args, "12")
+		if stdin != "55987200" { // 12 frames * 1080*1080*4
+			t.Errorf("ffmpeg read %s bytes, want 12 frames", stdin)
+		}
+		if out := args[len(args)-1]; out != filepath.Join(dir, "red_cycle_loop.mp4") {
+			t.Errorf("output = %s", out)
+		}
+	})
+
+	t.Run("grid mixed", func(t *testing.T) {
+		args, _ := runCLI(t, "grid", "--no-audio", "--n", "2", "--tiles", "mixed", "--bpm", "120", red, blue, green)
+		silent(t, args, "45") // 3 images, a beat (15 frames) each
+	})
+
+	t.Run("train", func(t *testing.T) {
+		args, _ := runCLI(t, "train", "--no-audio", "--copies", "4", red, blue)
+		silent(t, args, "40") // two copies at 1.5 per second
+	})
+}
+
+func TestCLINoAudioArgErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"grid", "--no-audio"},
+		{"--no-audio", "--bpm", "auto", "a.png"},
+	} {
+		cmd := newRootCmd()
+		cmd.SetArgs(args)
+		cmd.SetOut(new(strings.Builder))
+		cmd.SetErr(new(strings.Builder))
+		if err := cmd.Execute(); err == nil {
+			t.Errorf("nltl-animate %v: expected an error", args)
+		}
+	}
+}
+
+func TestHeadlessCommandNoAudio(t *testing.T) {
+	o := opts(styleSingle, "a.png", "b.png")
+	o.NoAudio, o.AudioPath, o.Seed = true, "", 5
+	if got, want := o.headlessCommand(), "nltl-animate --preset industrial --no-audio --seed 5 a.png b.png"; got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
