@@ -7,6 +7,11 @@ const (
 	// (zoompan's "on") and the raw frame streams both assume it.
 	FPS = 30
 
+	// Size is the width and height of every output video. Output is always
+	// square; letterboxing or pillarboxing for a particular player is a
+	// separate step.
+	Size = 1080
+
 	// PreviewSeconds is the maximum length of a --preview render.
 	PreviewSeconds = 10
 )

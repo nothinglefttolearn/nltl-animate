@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/video"
+	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
 type Preset struct {

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
 )
 
 func TestPresetOptions(t *testing.T) {
@@ -31,32 +31,26 @@ func TestOrFirst(t *testing.T) {
 }
 
 func TestValidateBPM(t *testing.T) {
-	for in, wantErr := range map[string]bool{"": false, "140": false, "0": true, "-3": true, "abc": true} {
+	for in, wantErr := range map[string]bool{"": false, "auto": false, "140": false, "0": true, "-3": true, "abc": true} {
 		if err := validateBPM(in); (err != nil) != wantErr {
 			t.Errorf("validateBPM(%q) err = %v, wantErr %v", in, err, wantErr)
 		}
 	}
 }
 
-func TestStyleOptionsHideCycleWithOneImage(t *testing.T) {
-	values := func(n int) []string {
-		var v []string
-		for _, o := range styleOptions(n) {
-			v = append(v, o.Value)
-		}
-		return v
+func TestStyleOptions(t *testing.T) {
+	var got []string
+	for _, o := range styleOptions() {
+		got = append(got, o.Value)
 	}
-	if got := values(1); slices.Contains(got, StyleCycle) || len(got) != 3 {
-		t.Errorf("1 image: %v", got)
-	}
-	if got := values(2); !slices.Equal(got, []string{StyleSingle, StyleCycle, StyleGrid, StyleTrain}) {
-		t.Errorf("2 images: %v", got)
+	if !slices.Equal(got, []string{StyleSingle, StyleGrid, StyleTrain}) {
+		t.Errorf("styles = %v", got)
 	}
 }
 
-func TestValidateCycleImagesAndGridN(t *testing.T) {
-	if validateCycleImages([]string{"a"}) == nil || validateCycleImages([]string{"a", "b"}) != nil {
-		t.Error("cycle needs at least 2 images")
+func TestValidateImagesAndGridN(t *testing.T) {
+	if validateImages(nil) == nil || validateImages([]string{"a"}) != nil {
+		t.Error("need at least 1 image")
 	}
 	for in, ok := range map[string]bool{"1": true, "12": true, "0": false, "13": false, "x": false, "": false} {
 		if (validateGridN(in) == nil) != ok {

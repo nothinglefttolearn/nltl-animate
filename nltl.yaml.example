@@ -1,5 +1,5 @@
-# nltl-clip custom preset config
-# Usage: nltl-clip --config nltl.yaml --preset my-preset audio.wav cover.jpg
+# nltl-animate custom preset config
+# Usage: nltl-animate --config nltl.yaml --preset my-preset audio.wav cover.jpg
 #
 # Each preset starts from another preset and only overrides the fields
 # listed. `extends` defaults to "industrial"; it can name a built-in

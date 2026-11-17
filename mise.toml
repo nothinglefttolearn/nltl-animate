@@ -7,10 +7,10 @@ golangci-lint = "2.15.0"
 CGO_ENABLED = "0"
 
 [tasks.build]
-description = "Build the nltl-clip binary"
-run = "go build -trimpath -o nltl-clip ./cmd/nltl-clip/"
+description = "Build the nltl-animate binary"
+run = "go build -trimpath -o nltl-animate ./cmd/nltl-animate/"
 sources = ["go.mod", "go.sum", "**/*.go"]
-outputs = ["nltl-clip"]
+outputs = ["nltl-animate"]
 
 [tasks.fmt]
 description = "Format code (gofmt + goimports via golangci-lint)"

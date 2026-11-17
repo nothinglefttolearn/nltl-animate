@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/ffmpeg"
+	"github.com/nothinglefttolearn/nltl-animate/internal/ffmpeg"
 )
 
 var (

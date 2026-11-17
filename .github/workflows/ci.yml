@@ -59,7 +59,7 @@ jobs:
         with:
           install_args: go
           cache: true
-      - run: go build -trimpath ./cmd/nltl-clip/
+      - run: go build -trimpath ./cmd/nltl-animate/
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}

@@ -8,7 +8,7 @@ import (
 
 func benchTrain(b *testing.B) *Train {
 	b.Helper()
-	tr, err := NewTrain(ring(1024), 1080, 1920, DefaultTrainOptions())
+	tr, err := NewTrain([]image.Image{ring(1024)}, 1080, 1920, DefaultTrainOptions())
 	if err != nil {
 		b.Fatal(err)
 	}

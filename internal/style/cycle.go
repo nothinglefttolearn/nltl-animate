@@ -8,7 +8,7 @@ import (
 	"math"
 	"math/rand/v2"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/video"
+	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
 // Cycle shows a random one of its images on every frame (or every Hold

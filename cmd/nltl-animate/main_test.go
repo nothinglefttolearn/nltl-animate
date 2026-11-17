@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/config"
-	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/config"
+	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
 )
 
 func TestResolvePreset(t *testing.T) {
@@ -49,14 +49,17 @@ func TestLoadConfigEmptyPath(t *testing.T) {
 func TestHeadlessCommand(t *testing.T) {
 	base := defaultRenderOptions()
 	base.AudioPath, base.ImagePaths = "a.wav", []string{"i.jpg"}
-	base.ProfileName, base.PresetName = "youtube", "dark"
+	base.PresetName = "dark"
 
 	full := base
 	full.BPM, full.Still, full.Preview = 138, true, true
 	full.ConfigPath, full.OutputDir = "nltl.yaml", "out"
 
-	cycle := base
-	cycle.Style, cycle.ImagePaths, cycle.Seed, cycle.Hold = styleCycle, []string{"a.png", "b.png"}, 42, 3
+	several := base
+	several.ImagePaths, several.Seed, several.Hold = []string{"a.png", "b.png"}, 42, 3
+
+	gridMixed := base
+	gridMixed.Style, gridMixed.ImagePaths, gridMixed.Seed, gridMixed.Tiles = styleGrid, []string{"a.png", "b.png"}, 9, tilesMixed
 
 	grid := base
 	grid.Style, grid.GridN = styleGrid, 4
@@ -69,11 +72,12 @@ func TestHeadlessCommand(t *testing.T) {
 		opts renderOptions
 		want string
 	}{
-		{"minimal", base, "nltl-clip --profile youtube --preset dark a.wav i.jpg"},
-		{"all flags", full, "nltl-clip --profile youtube --preset dark --bpm 138 --still --preview --config nltl.yaml --output-dir out a.wav i.jpg"},
-		{"cycle", cycle, "nltl-clip cycle --profile youtube --preset dark --hold 3 --seed 42 a.wav a.png b.png"},
-		{"grid", grid, "nltl-clip grid --profile youtube --preset dark --n 4 a.wav i.jpg"},
-		{"train only changed flags", train, "nltl-clip train --profile youtube --preset dark --copies 30 --vanish 0.7 --bg #112233 a.wav i.jpg"},
+		{"minimal", base, "nltl-animate --preset dark a.wav i.jpg"},
+		{"all flags", full, "nltl-animate --preset dark --bpm 138 --still --preview --config nltl.yaml --output-dir out a.wav i.jpg"},
+		{"several images", several, "nltl-animate --preset dark --hold 3 --seed 42 a.wav a.png b.png"},
+		{"grid mixed", gridMixed, "nltl-animate grid --preset dark --seed 9 --n 3 --tiles mixed a.wav a.png b.png"},
+		{"grid", grid, "nltl-animate grid --preset dark --n 4 a.wav i.jpg"},
+		{"train only changed flags", train, "nltl-animate train --preset dark --copies 30 --vanish 0.7 --bg #112233 a.wav i.jpg"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

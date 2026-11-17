@@ -1,4 +1,4 @@
-module github.com/nothinglefttolearn/nltl-clip
+module github.com/nothinglefttolearn/nltl-animate
 
 go 1.27.4
 

@@ -1,6 +1,8 @@
-# nltl-clip
+# nltl-animate
 
-A CLI tool for generating animated video clips from a music file and one or more images. Built around ffmpeg with BPM-synced visuals and output profiles for social media platforms.
+A CLI tool that animates still images to music: it takes a track and one or more images and renders a video in which the images move, switch and travel in time with the beat. Built around ffmpeg.
+
+The output is always a 1080×1080 square video. Fitting it to a particular player or aspect ratio (letterboxing, pillarboxing, cropping) is left to a separate step.
 
 ## Requirements
 
@@ -10,78 +12,92 @@ A CLI tool for generating animated video clips from a music file and one or more
 ## Install
 
 ```bash
-go install github.com/nothinglefttolearn/nltl-clip/cmd/nltl-clip@latest
+go install github.com/nothinglefttolearn/nltl-animate/cmd/nltl-animate@latest
 ```
 
 Or build locally:
 
 ```bash
-git clone https://github.com/nothinglefttolearn/nltl-clip
-cd nltl-clip
-go build -o nltl-clip ./cmd/nltl-clip/
+git clone https://github.com/nothinglefttolearn/nltl-animate
+cd nltl-animate
+go build -o nltl-animate ./cmd/nltl-animate/
 ```
 
 ## Usage
 
 ```
-nltl-clip [audio] [image] [flags]                  # single image (default style)
-nltl-clip cycle <audio> <image> <image>... [flags]
-nltl-clip grid  <audio> <image> [flags]
-nltl-clip train <audio> <image> [flags]
-nltl-clip                                          # interactive: asks for everything
+nltl-animate       <audio> <image> [image...] [flags]   # single (default style)
+nltl-animate grid  <audio> <image> [image...] [flags]
+nltl-animate train <audio> <image> [image...] [flags]
+nltl-animate                                            # interactive: asks for everything
 ```
 
 ```bash
 # Preview 10 seconds before committing to a full render
-nltl-clip --preset industrial --bpm 138 --preview demo.wav cover.jpg
+nltl-animate --preset industrial --bpm 138 --preview demo.wav cover.jpg
 
-# Full render for Instagram feed
-nltl-clip --preset industrial --bpm 138 demo.wav cover.jpg
+# Full render
+nltl-animate --preset industrial --bpm 138 demo.wav cover.jpg
 
-# YouTube version
-nltl-clip --profile youtube --preset dark --bpm 138 demo.wav cover.jpg
+# Detect the tempo instead of passing it
+nltl-animate --preset dark --bpm auto demo.wav cover.jpg
 
 # Use a custom preset from a config file
-nltl-clip --config nltl.yaml --preset my-preset --bpm 138 demo.wav cover.jpg
+nltl-animate --config nltl.yaml --preset my-preset --bpm 138 demo.wav cover.jpg
 ```
 
-Output files are saved alongside the audio file, named `{trackname}_{profile}.mp4`; other styles add the style, e.g. `demo_youtube_grid4.mp4` or `demo_instagram_story_train.mp4`.
+Output files are saved alongside the audio file (or in `--output-dir`), named after the track and the style: `demo_single.mp4`, `demo_cycle.mp4` (single with several images), `demo_grid4.mp4`, `demo_grid3_mixed.mp4`, `demo_train.mp4`, with `_preview` added for previews.
 
 ## Styles
 
-Every style gets the preset's motion (zoom breathing, jitter) and grade (blur, brightness pulse, contrast, saturation, vignette, grain), so `--preset`, `--bpm` and `--still` work everywhere. Run `nltl-clip <style> --help` for each style's flags.
+Every style gets the preset's motion (zoom breathing, jitter) and grade (blur, brightness pulse, contrast, saturation, vignette, grain), so `--preset`, `--bpm` and `--still` work everywhere. Run `nltl-animate <style> --help` for each style's flags.
+
+Every style takes one or more images. Single and grid switch between several images over time; train puts a different image in each car.
+
+### Switching between images (single and grid)
+
+With several images, the clip jumps to a random image (never the same one twice in a row) every beat with `--bpm`, or every half second without. Change the rate with `--hold` (frames) or `--hold-beats` (beats, needs `--bpm`):
+
+```bash
+nltl-animate --bpm 140 demo.wav frames/*.png                       # new image every beat
+nltl-animate --hold 1 demo.wav frames/*.png                         # every frame: jittery animation
+nltl-animate --bpm 140 --hold-beats 0.25 demo.wav frames/*.png      # every 16th note
+```
+
+The sequence is random but reproducible: each render prints its `--seed`, and passing the same seed gives the same clip. Images are cover-cropped to the output (or tile) size; each one uses about `width × height × 4` bytes of memory (8 MB at 1080×1920).
 
 ### single
 
-One image, gently moving. The default when you pass `audio image`.
-
-### cycle
-
-Jumps to a random image on every frame (never the same one twice in a row), so a folder of images works as loose, jittery animation.
-
-```bash
-nltl-clip cycle --bpm 140 demo.wav frames/*.png
-nltl-clip cycle --hold 3 demo.wav a.jpg b.jpg c.jpg           # change every 3 frames
-nltl-clip cycle --bpm 140 --hold-beats 0.25 demo.wav frames/*.png  # change every 16th note
-```
-
-The sequence is random but reproducible: each render prints its `--seed`, and passing the same seed gives the same clip. Images are cover-cropped to the output size; each one uses about `width × height × 4` bytes of memory (8 MB at 1080×1920).
+The image gently moving. The default style: just pass `audio image [image...]`.
 
 ### grid
 
 The image tiled N×N, every tile moving in sync. The vignette and grain are applied once over the whole frame.
 
 ```bash
-nltl-clip grid --n 4 demo.wav cover.jpg
+nltl-animate grid --n 4 demo.wav cover.jpg
+```
+
+With several images, `--tiles` picks how they are spread over the tiles:
+
+- `--tiles same` (default): every tile shows the same image and they all switch together. The grid repeats one sequence N×N times.
+- `--tiles mixed`: each tile shows a different image and follows its own random sequence. All tiles switch at the same moments, every tile moves to a new image at each switch, and no two tiles show the same image at once as long as there are at least as many images as tiles (otherwise the images are spread as evenly as possible).
+
+```bash
+nltl-animate grid --n 3 --bpm 138 demo.wav frames/*.png                  # same image everywhere
+nltl-animate grid --n 3 --tiles mixed --bpm 138 demo.wav frames/*.png    # a different image per tile
 ```
 
 ### train
 
 A fake 3D scene: copies of the image come out of the distance and pass on your left, like standing beside a track watching a train go by. Use a PNG with transparency (a logo, a cut-out) so the copies behind show through. Distant copies fade into the background colour.
 
+Pass several images and the cars cycle through them in order, so a different image passes at every step. Each image keeps its own shape; their inner edges line up along the track.
+
 ```bash
-nltl-clip train --bpm 138 demo.wav logo.png                 # one copy passes per beat
-nltl-clip train --bpm 138 --beats 0.5 --vanish 0.7 --bg '#101820' demo.wav logo.png
+nltl-animate train --bpm 138 demo.wav logo.png                 # one copy passes per beat
+nltl-animate train --bpm 138 --beats 0.5 --vanish 0.7 --bg '#101820' demo.wav logo.png
+nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # a, b, c, a, b, c, ... down the line
 ```
 
 | Flag | Default | Description |
@@ -91,7 +107,7 @@ nltl-clip train --bpm 138 --beats 0.5 --vanish 0.7 --bg '#101820' demo.wav logo.
 | `--speed` | `1.5` | copies passing per second, without `--bpm` |
 | `--beats` | `1` | beats per passing copy, with `--bpm` |
 | `--vanish` | `0.5` | where the track vanishes across the frame; `0.6`–`0.75` fills more of it |
-| `--offset` | `0.25` | gap between the track and you, in copy widths |
+| `--offset` | `0.25` | gap between the track and you, in widths of the widest image |
 | `--fov` | `60` | field of view in degrees (wider = stronger perspective) |
 | `--fog` | `0.6` | how much distant copies fade into the background, 0–1 |
 | `--bg` | `#000000` | background colour |
@@ -100,25 +116,14 @@ nltl-clip train --bpm 138 --beats 0.5 --vanish 0.7 --bg '#101820' demo.wav logo.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--profile`, `-p` | `instagram-square` | Output dimensions |
 | `--preset` | `industrial` | Visual style |
-| `--bpm` | `0` | Track BPM for beat-synced animation (0 = time-based) |
+| `--bpm` | `0` | Track BPM for beat-synced animation, or `auto` to detect it (0 = time-based) |
 | `--preview` | `false` | Render 10s at low quality to check the look |
 | `--output-dir`, `-o` | same as audio | Where to write the output file |
 | `--still` | `false` | Disable zoom and jitter (brightness pulse stays) |
 | `--verbose`, `-v` | `false` | Show ffmpeg's output while rendering |
 | `--config`, `-c` | — | YAML file with custom presets |
 | `--version` | — | Print the version and exit |
-
-## Profiles
-
-| Name | Resolution |
-|------|------------|
-| `instagram-square` | 1080×1080 |
-| `instagram-story` | 1080×1920 |
-| `youtube` | 1920×1080 |
-
-Run `nltl-clip profiles` to list them.
 
 ## Presets
 
@@ -128,7 +133,7 @@ Run `nltl-clip profiles` to list them.
 | `clean` | Full colour, minimal grain, subtle movement |
 | `dark` | Deep blacks, extreme grain, maximum vignette |
 
-Run `nltl-clip presets` to list them.
+Run `nltl-animate presets` to list them.
 
 ## Custom Presets
 
@@ -166,3 +171,11 @@ The config is checked when it's loaded. Unknown keys (typos), values out of rang
 When `--bpm` is set, zoom, jitter, and brightness oscillations are tied to the track's beat grid rather than fixed time intervals. The `zoom_beats` and `brightness_beats` fields in a preset control how many beats each animation cycle spans.
 
 At 138 BPM with `zoom_beats: 8`, the zoom breath completes one cycle every ~3.5 seconds — one slow inhale per 8 beats.
+
+`--bpm auto` detects the tempo from the audio (the first 5 minutes) and prints it in the summary and in the "run this again" command, so you can pin it once you know it. In the interactive form, type `auto` in the BPM field.
+
+```bash
+nltl-animate train --bpm auto demo.wav logo.png
+```
+
+Detection is built in (no extra tools beyond ffmpeg) and gives a whole-number BPM, which suits tracks made at a fixed tempo. It is most reliable on music with a steady kick. Like any tempo detector, it can land on half or double the tempo you'd count (e.g. 87 for drum & bass at 174). The visuals still hit the beat then, just at half or twice the rate. Pass `--bpm 174` to override. Tracks with no clear beat give an error rather than a guess.

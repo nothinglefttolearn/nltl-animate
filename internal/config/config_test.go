@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
 )
 
 func writeFile(t *testing.T, content string) string {

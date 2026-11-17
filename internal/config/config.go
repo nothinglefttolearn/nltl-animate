@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
 )
 
 // DefaultBase is the preset a custom preset inherits from when it has no

@@ -17,7 +17,7 @@ func newTestTrain(t *testing.T, img image.Image, w, h int, mod func(*TrainOption
 	if mod != nil {
 		mod(&o)
 	}
-	tr, err := NewTrain(img, w, h, o)
+	tr, err := NewTrain([]image.Image{img}, w, h, o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,18 +86,91 @@ func TestTrainExitsLeftBeforeWrapping(t *testing.T) {
 	for _, vanish := range []float64{0.3, 0.5, 0.9} {
 		for _, img := range []image.Image{ring(64), solid(300, 100, color.RGBA{A: 255}), solid(50, 200, color.RGBA{A: 255})} {
 			tr := newTestTrain(t, img, 1080, 1920, func(o *TrainOptions) { o.Vanish = vanish })
-			left, _, width, _ := tr.screenRect(tr.near)
+			left, _, width, _ := tr.screenRect(tr.near, tr.aspect)
 			if left+width >= 0 {
 				t.Errorf("vanish=%v aspect=%.2f: copy at the near plane still visible (right edge %.1f)",
 					vanish, tr.aspect, left+width)
 			}
 			// And the farthest copy is right of the vanishing point's left side
 			// only by its own width: the track recedes towards cx.
-			l2, _, w2, _ := tr.screenRect(tr.near + tr.length)
+			l2, _, w2, _ := tr.screenRect(tr.near+tr.length, tr.aspect)
 			if l2+w2 > tr.cx || l2+w2 < tr.cx-w2*2 {
 				t.Errorf("far copy at %.1f..%.1f should end just left of cx=%.1f", l2, l2+w2, tr.cx)
 			}
 		}
+	}
+}
+
+func TestTrainCyclesImagesAlongTheLineup(t *testing.T) {
+	imgs := []image.Image{
+		solid(32, 32, color.RGBA{R: 255, A: 255}),
+		solid(64, 32, color.RGBA{G: 255, A: 255}),
+		solid(16, 32, color.RGBA{B: 255, A: 255}),
+	}
+	for _, copies := range []int{24, 7, 2} { // multiple of 3, not a multiple, fewer copies than images
+		o := DefaultTrainOptions()
+		o.Copies = copies
+		tr, err := NewTrain(imgs, 1080, 1080, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tr.aspect != 2 {
+			t.Fatalf("track should be offset by the widest image, aspect=%v", tr.aspect)
+		}
+		prevNearest := -1
+		for i := range 400 {
+			cs := tr.copies(float64(i) * 0.05)
+			// Near to far, each car shows the next image.
+			for j := len(cs) - 1; j > 0; j-- {
+				if want := (cs[j].img + 1) % 3; cs[j-1].img != want {
+					t.Fatalf("copies=%d t=%v: car behind image %d shows %d, want %d",
+						copies, float64(i)*0.05, cs[j].img, cs[j-1].img, want)
+				}
+			}
+			// When the nearest car wraps away, the next image takes its place.
+			nearest := cs[len(cs)-1].img
+			if prevNearest >= 0 && nearest != prevNearest && nearest != (prevNearest+1)%3 {
+				t.Fatalf("copies=%d: nearest jumped from image %d to %d", copies, prevNearest, nearest)
+			}
+			prevNearest = nearest
+		}
+	}
+}
+
+func TestTrainMixedAspectsShareInnerEdge(t *testing.T) {
+	tr, err := NewTrain([]image.Image{solid(32, 32, color.RGBA{A: 255}), solid(96, 32, color.RGBA{A: 255})},
+		1080, 1080, DefaultTrainOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	z := tr.near + 3
+	l1, _, w1, _ := tr.screenRect(z, tr.imgs[0].aspect)
+	l2, _, w2, _ := tr.screenRect(z, tr.imgs[1].aspect)
+	if math.Abs((l1+w1)-(l2+w2)) > 1e-9 || math.Abs(w2-3*w1) > 1e-9 {
+		t.Errorf("inner edges %v vs %v, widths %v vs %v", l1+w1, l2+w2, w1, w2)
+	}
+}
+
+func TestTrainDropsUnusedMipLevels(t *testing.T) {
+	// A wide image sits far from the viewer, so the nearest copy is only
+	// ~177 px tall here: of the 1024..32 chain, only 256 and below are needed.
+	tr := newTestTrain(t, solid(4096, 1024, color.RGBA{A: 255}), 320, 320, nil)
+	maxHeight := tr.focal / tr.near
+	top := float64(tr.imgs[0].mips[0].Bounds().Dy())
+	if top < maxHeight || top >= 2*maxHeight {
+		t.Errorf("largest kept level is %v px tall; want the smallest level >= %v", top, maxHeight)
+	}
+
+	// A source smaller than the largest drawn size is kept whole.
+	small := newTestTrain(t, solid(64, 64, color.RGBA{A: 255}), 1080, 1080, nil)
+	if got := small.imgs[0].mips[0].Bounds().Dy(); got != 64 {
+		t.Errorf("small source should be kept, top level %d px tall", got)
+	}
+}
+
+func TestNewTrainNeedsImages(t *testing.T) {
+	if _, err := NewTrain(nil, 64, 64, DefaultTrainOptions()); err == nil {
+		t.Error("expected an error with no images")
 	}
 }
 
@@ -177,17 +250,17 @@ func TestDrawBilinearClipsOffscreen(t *testing.T) {
 func TestMipChainAndSelection(t *testing.T) {
 	tr := newTestTrain(t, solid(512, 256, color.RGBA{G: 255, A: 255}), 1080, 1080, nil)
 	var heights []int
-	for _, m := range tr.mips {
+	for _, m := range tr.imgs[0].mips {
 		heights = append(heights, m.Bounds().Dy())
 	}
 	if !slices.Equal(heights, []int{256, 128, 64, 32, 16}) {
 		t.Errorf("mip heights = %v", heights)
 	}
-	if c := tr.mips[3].RGBAAt(1, 1); c.G != 255 {
+	if c := tr.imgs[0].mips[3].RGBAAt(1, 1); c.G != 255 {
 		t.Errorf("mip colour drifted: %v", c)
 	}
 	for target, want := range map[float64]int{1000: 256, 200: 256, 128: 128, 100: 128, 20: 32, 3: 16} {
-		if got := tr.mipFor(target).Bounds().Dy(); got != want {
+		if got := tr.imgs[0].mipFor(target).Bounds().Dy(); got != want {
 			t.Errorf("mipFor(%v) = %d tall, want %d", target, got, want)
 		}
 	}

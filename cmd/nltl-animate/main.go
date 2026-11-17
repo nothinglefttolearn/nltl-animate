@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -8,9 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/interactive"
-	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
-	"github.com/nothinglefttolearn/nltl-clip/internal/profile"
+	"github.com/nothinglefttolearn/nltl-animate/internal/interactive"
+	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
 )
 
 var (
@@ -21,7 +21,7 @@ var (
 
 // version can be set at build time:
 //
-//	go build -ldflags "-X main.version=v1.2.3" ./cmd/nltl-clip
+//	go build -ldflags "-X main.version=v1.2.3" ./cmd/nltl-animate
 var version string
 
 // buildVersion prefers an injected version, then the module version Go
@@ -49,18 +49,26 @@ func newRootCmd() *cobra.Command {
 	opts := defaultRenderOptions()
 
 	root := &cobra.Command{
-		Use:   "nltl-clip [audio] [image]",
-		Short: "Generate social media video clips from audio and images",
-		Long: `Generate social media video clips from audio and images.
+		Use:   "nltl-animate [audio] [image...]",
+		Short: "Animate images to music",
+		Long: `Animate images to music: renders a square 1080×1080 video from an audio
+track and one or more images, moving and switching them in time with the beat.
 
-With an audio file and an image, renders the single-image style. Other
-styles are subcommands (cycle, grid, train). With no arguments, an
-interactive form asks for everything.`,
+With an audio file and an image, renders the image gently moving. With
+several images, switches between them at random (never the same image twice
+in a row), every beat with --bpm or as set by --hold/--hold-beats; every run
+prints its --seed so a clip can be reproduced exactly.
+
+Other styles are subcommands (grid, train); every style takes one or more
+images. With no arguments, an interactive form asks for everything.`,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 || len(args) == 2 {
+			if len(args) > 0 && args[0] == "cycle" {
+				return errors.New("the cycle style is now the default: pass several images directly, e.g. nltl-animate song.wav a.png b.png")
+			}
+			if len(args) == 0 || len(args) >= 2 {
 				return nil
 			}
-			return fmt.Errorf("expected 0 args (interactive) or 2 args (audio image), got %d", len(args))
+			return fmt.Errorf("expected no args (interactive) or audio and image(s), got %d arg", len(args))
 		},
 		Version: buildVersion(),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,7 +76,7 @@ interactive form asks for everything.`,
 			// runtime failure (bad config, ffmpeg) and usage text is noise.
 			cmd.SilenceUsage = true
 
-			if len(args) == 2 {
+			if len(args) >= 2 {
 				opts.Style = styleSingle
 				opts.AudioPath, opts.ImagePaths = args[0], args[1:]
 				return run(opts)
@@ -77,10 +85,11 @@ interactive form asks for everything.`,
 		},
 	}
 	addRenderFlags(root, &opts)
+	addSwitchFlags(root, &opts)
 
 	root.AddCommand(
-		cycleCmd(), gridCmd(), trainCmd(),
-		presetsCmd(), profilesCmd(),
+		gridCmd(), trainCmd(),
+		presetsCmd(),
 	)
 	return root
 }
@@ -91,11 +100,12 @@ func runInteractive(opts renderOptions) error {
 		return err
 	}
 	choices, err := interactive.Run(interactive.Defaults{
-		ProfileName:   opts.ProfileName,
 		PresetName:    opts.PresetName,
 		BPM:           opts.BPM,
+		AutoBPM:       opts.AutoBPM,
 		Still:         opts.Still,
 		GridN:         opts.GridN,
+		Tiles:         opts.Tiles,
 		CustomPresets: cfg.Presets,
 	})
 	if err != nil {
@@ -104,11 +114,11 @@ func runInteractive(opts renderOptions) error {
 	opts.Style = clipStyle(choices.Style)
 	opts.AudioPath = choices.AudioPath
 	opts.ImagePaths = choices.ImagePaths
-	opts.ProfileName = choices.ProfileName
 	opts.PresetName = choices.PresetName
-	opts.BPM = choices.BPM
+	opts.BPM, opts.AutoBPM = choices.BPM, choices.AutoBPM
 	opts.Still = choices.Still
 	opts.GridN = choices.GridN
+	opts.Tiles = choices.Tiles
 
 	fmt.Println()
 	if err := renderClip(&opts, cfg); err != nil {
@@ -129,23 +139,6 @@ func presetsCmd() *cobra.Command {
 				fmt.Printf("  %s  %s\n",
 					valueStyle.Render(fmt.Sprintf("%-14s", name)),
 					labelStyle.Render(p.Description),
-				)
-			}
-		},
-	}
-}
-
-func profilesCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "profiles",
-		Short: "List available output profiles",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(valueStyle.Render("Output profiles:"))
-			for _, name := range profile.Names() {
-				p, _ := profile.Get(name)
-				fmt.Printf("  %s  %s\n",
-					valueStyle.Render(fmt.Sprintf("%-22s", name)),
-					labelStyle.Render(fmt.Sprintf("%dx%d", p.Width, p.Height)),
 				)
 			}
 		},

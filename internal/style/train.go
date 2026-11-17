@@ -12,8 +12,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/frames"
-	"github.com/nothinglefttolearn/nltl-clip/internal/video"
+	"github.com/nothinglefttolearn/nltl-animate/internal/frames"
+	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
 // TrainOptions controls the train fly-by. Zero values are not meaningful;
@@ -24,7 +24,7 @@ type TrainOptions struct {
 	Speed   float64 // copies passing the viewer per second (ignored when BPM > 0)
 	BPM     int     // when > 0, one copy passes every Beats beats
 	Beats   float64
-	Offset  float64 // gap between the track and the viewer, in copy widths
+	Offset  float64 // gap between the track and the viewer, in widths of the widest image
 	FOV     float64 // horizontal field of view, degrees
 	Vanish  float64 // horizontal position of the vanishing point, 0 = left edge, 1 = right edge
 	BG      color.RGBA
@@ -80,47 +80,79 @@ func (o TrainOptions) Validate() error {
 // so they never pop into existence.
 const fadeInFraction = 0.15
 
-// Train renders copies of an image on a straight track to the viewer's left,
-// travelling towards and past the camera. It implements ffmpeg.FrameSource.
+// Train renders copies of one or more images on a straight track to the
+// viewer's left, travelling towards and past the camera. With several images,
+// consecutive cars show them in turn (0, 1, 2, ..., 0, 1, ...), so a
+// different image passes on every step. It implements ffmpeg.FrameSource.
 //
 // World space: pinhole camera at the origin looking down +z, x right, y down.
-// Each copy is a camera-facing billboard 1 unit tall, centred at
-// (trackX, 0, z).
+// Each copy is a camera-facing billboard 1 unit tall and as wide as its
+// image's aspect ratio. All copies share the inner (right) edge x = innerX,
+// so images of different shapes still line up along the track.
 type Train struct {
 	w, h int
 	opts TrainOptions
-	mips []*image.RGBA // mips[0] is the source; each next level is half size
+	imgs []trainImage
 
-	aspect   float64 // copy width / height
+	aspect   float64 // widest image's width / height; sets the track offset
 	focal    float64 // pixels per world unit at z = 1
 	cx       float64 // screen x of the vanishing point (lens shift)
-	trackX   float64
+	innerX   float64 // x of every copy's inner (right) edge
 	near     float64 // depth at which a copy wraps to the back
 	length   float64 // track length in depth: Copies * Spacing
 	velocity float64 // world units per second
 }
 
-func NewTrain(img image.Image, w, h int, opts TrainOptions) (*Train, error) {
+// trainImage is one image on the train, ready to draw.
+type trainImage struct {
+	mips   []*image.RGBA // mips[0] is the largest kept level; each next is half size
+	aspect float64       // width / height
+}
+
+// NewTrain builds a train from one or more images. Copies show the images
+// in order, cycling through them along the lineup.
+func NewTrain(imgs []image.Image, w, h int, opts TrainOptions) (*Train, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
-	src := frames.ToRGBA(img)
-	if src.Bounds().Dx() < 1 || src.Bounds().Dy() < 1 {
-		return nil, errors.New("train: empty image")
+	if len(imgs) == 0 {
+		return nil, errors.New("train: no images")
 	}
 
-	t := &Train{w: w, h: h, opts: opts, mips: mipChain(src)}
-	t.aspect = float64(src.Bounds().Dx()) / float64(src.Bounds().Dy())
+	t := &Train{w: w, h: h, opts: opts, imgs: make([]trainImage, len(imgs))}
+	srcs := make([]*image.RGBA, len(imgs))
+	for i, img := range imgs {
+		src := frames.ToRGBA(img)
+		if src.Bounds().Dx() < 1 || src.Bounds().Dy() < 1 {
+			return nil, fmt.Errorf("train: image %d is empty", i+1)
+		}
+		srcs[i] = src
+		t.imgs[i].aspect = float64(src.Bounds().Dx()) / float64(src.Bounds().Dy())
+		t.aspect = max(t.aspect, t.imgs[i].aspect)
+	}
+
 	t.focal = float64(w) / 2 / math.Tan(opts.FOV*math.Pi/360)
 	t.cx = opts.Vanish * float64(w)
 	gap := opts.Offset * t.aspect
-	t.trackX = -(gap + t.aspect/2)
+	t.innerX = -gap
 
 	// A copy's inner (right) edge is at x = -gap. It is off the left of the
 	// screen once cx - focal*gap/z < 0, i.e. z < focal*gap/cx. Wrap a
 	// little closer than that so nothing visible ever pops.
 	t.near = 0.9 * t.focal * gap / t.cx
 	t.length = float64(opts.Copies) * opts.Spacing
+
+	// No copy is ever drawn taller than it is at the near plane, so mip
+	// levels above that size would never be sampled. Dropping them keeps
+	// many large images from piling up in memory.
+	maxHeight := t.focal / t.near
+	for i, src := range srcs {
+		mips := mipChain(src)
+		for len(mips) > 1 && float64(mips[1].Bounds().Dy()) >= maxHeight {
+			mips = mips[1:]
+		}
+		t.imgs[i].mips = mips
+	}
 
 	perSecond := opts.Speed
 	if opts.BPM > 0 {
@@ -132,9 +164,10 @@ func NewTrain(img image.Image, w, h int, opts TrainOptions) (*Train, error) {
 
 func (t *Train) Size() (int, int) { return t.w, t.h }
 
-// copyState is one copy's depth and opacity at a moment in time.
+// copyState is one copy's depth, opacity and image at a moment in time.
 type copyState struct {
 	z, alpha float64
+	img      int // index into Train.imgs
 }
 
 // copies returns every copy at time sec, sorted far to near (draw order).
@@ -142,23 +175,32 @@ func (t *Train) copies(sec float64) []copyState {
 	cs := make([]copyState, t.opts.Copies)
 	for k := range cs {
 		// d is the distance from the wrap point; it shrinks as time passes.
-		d := math.Mod(float64(k)*t.opts.Spacing-sec*t.velocity, t.length)
-		if d < 0 {
-			d += t.length
+		// wraps counts how often this copy has gone round (negative, since
+		// d decreases), which identifies the car on an endless train.
+		p := float64(k)*t.opts.Spacing - sec*t.velocity
+		wraps := math.Floor(p / t.length)
+		d := p - wraps*t.length
+		if d >= t.length { // floating-point edge
+			d -= t.length
+			wraps++
 		}
+		// Car n of the endless train; consecutive cars have consecutive n,
+		// so they show consecutive images even across the wrap.
+		n := k - int(wraps)*t.opts.Copies
 		frac := d / t.length // 0 = nearest, 1 = farthest
 		alpha := (1 - t.opts.Fog*frac) * clamp01((1-frac)/fadeInFraction)
-		cs[k] = copyState{z: t.near + d, alpha: alpha}
+		cs[k] = copyState{z: t.near + d, alpha: alpha, img: posMod(n, len(t.imgs))}
 	}
 	slices.SortFunc(cs, func(a, b copyState) int { return cmp.Compare(b.z, a.z) }) // far first
 	return cs
 }
 
-// screenRect projects a copy at depth z to pixel coordinates.
-func (t *Train) screenRect(z float64) (left, top, width, height float64) {
+// screenRect projects a copy of the given aspect ratio at depth z to pixel
+// coordinates.
+func (t *Train) screenRect(z, aspect float64) (left, top, width, height float64) {
 	s := t.focal / z
-	width, height = t.aspect*s, s
-	left = t.cx + (t.trackX-t.aspect/2)*s
+	width, height = aspect*s, s
+	left = t.cx + (t.innerX-aspect)*s
 	top = float64(t.h)/2 - height/2
 	return left, top, width, height
 }
@@ -171,23 +213,24 @@ func (t *Train) RenderFrame(dst *image.RGBA, i int) {
 		if c.alpha <= 0 {
 			continue
 		}
-		left, top, width, height := t.screenRect(c.z)
+		img := &t.imgs[c.img]
+		left, top, width, height := t.screenRect(c.z, img.aspect)
 		if left+width < 0 || left > float64(t.w) || height < 0.5 {
 			continue
 		}
-		drawBilinear(dst, t.mipFor(height), left, top, width, height, c.alpha)
+		drawBilinear(dst, img.mipFor(height), left, top, width, height, c.alpha)
 	}
 }
 
 // mipFor picks the smallest mip level at least as tall as the target, so
 // bilinear sampling never minifies by more than 2x (which would shimmer).
-func (t *Train) mipFor(height float64) *image.RGBA {
-	for i := len(t.mips) - 1; i > 0; i-- {
-		if float64(t.mips[i].Bounds().Dy()) >= height {
-			return t.mips[i]
+func (ti *trainImage) mipFor(height float64) *image.RGBA {
+	for i := len(ti.mips) - 1; i > 0; i-- {
+		if float64(ti.mips[i].Bounds().Dy()) >= height {
+			return ti.mips[i]
 		}
 	}
-	return t.mips[0]
+	return ti.mips[0]
 }
 
 // WriteFrames renders frames in parallel and writes them in order.
@@ -336,3 +379,6 @@ func to8(v float32) uint8 {
 }
 
 func clamp01(v float64) float64 { return math.Max(0, math.Min(1, v)) }
+
+// posMod is a mod b in [0, b).
+func posMod(a, b int) int { return ((a % b) + b) % b }

@@ -2,9 +2,11 @@ package ffmpeg
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -12,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/video"
+	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
 // stderrTailLines caps how much tool output is copied into an error message.
@@ -67,6 +69,31 @@ func GetDuration(audioPath string) (float64, error) {
 		return 0, fmt.Errorf("ffprobe: could not read a duration from %s (got %q)", audioPath, s)
 	}
 	return d, nil
+}
+
+// DecodeMono decodes up to maxSeconds of audio from path as mono 32-bit
+// float samples at rate Hz.
+func DecodeMono(path string, rate int, maxSeconds float64) ([]float32, error) {
+	cmd := exec.Command("ffmpeg",
+		"-hide_banner", "-loglevel", "error",
+		"-i", path,
+		"-t", fmt.Sprintf("%.3f", maxSeconds),
+		"-vn", "-ac", "1", "-ar", strconv.Itoa(rate),
+		"-f", "f32le", "pipe:1",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		var stderr []byte
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			stderr = exitErr.Stderr
+		}
+		return nil, commandError("ffmpeg", err, stderr)
+	}
+	samples := make([]float32, len(out)/4)
+	for i := range samples {
+		samples[i] = math.Float32frombits(binary.LittleEndian.Uint32(out[4*i:]))
+	}
+	return samples, nil
 }
 
 func Render(opts Options) error {

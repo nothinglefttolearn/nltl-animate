@@ -11,9 +11,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
-	"github.com/nothinglefttolearn/nltl-clip/internal/profile"
-	"github.com/nothinglefttolearn/nltl-clip/internal/style"
+	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/style"
 )
 
 var audioExts = map[string]bool{
@@ -27,31 +26,32 @@ var imageExts = map[string]bool{
 // Style names match the CLI subcommands ("single" is the root command).
 const (
 	StyleSingle = "single"
-	StyleCycle  = "cycle"
 	StyleGrid   = "grid"
 	StyleTrain  = "train"
 )
 
 // Choices holds what the user picked in the form.
 type Choices struct {
-	Style       string
-	AudioPath   string
-	ImagePaths  []string
-	ProfileName string
-	PresetName  string
-	BPM         int
-	Still       bool
-	GridN       int
+	Style      string
+	AudioPath  string
+	ImagePaths []string
+	PresetName string
+	BPM        int
+	AutoBPM    bool
+	Still      bool
+	GridN      int
+	Tiles      string // grid with several images: "same" or "mixed"
 }
 
 // Defaults pre-fills the form (typically from command-line flags) and supplies
 // custom presets loaded from --config so they can be picked alongside built-ins.
 type Defaults struct {
-	ProfileName   string
 	PresetName    string
 	BPM           int
+	AutoBPM       bool
 	Still         bool
 	GridN         int
+	Tiles         string
 	CustomPresets []preset.Preset
 }
 
@@ -75,27 +75,31 @@ func Run(d Defaults) (*Choices, error) {
 	presetOpts, presetNames := presetOptions(d.CustomPresets)
 
 	var (
-		styleName   = StyleSingle
-		audioPath   = audioFiles[0]
-		imagePath   = imageFiles[0]
-		cyclePaths  []string
-		gridStr     = strconv.Itoa(max(1, d.GridN))
-		profileName = orFirst(d.ProfileName, profile.Names())
-		presetName  = orFirst(d.PresetName, presetNames)
-		bpmStr      = ""
-		still       = d.Still
+		styleName  = StyleSingle
+		audioPath  = audioFiles[0]
+		imagePaths []string
+		tiles      = orFirst(d.Tiles, []string{"same", "mixed"})
+		gridStr    = strconv.Itoa(max(1, d.GridN))
+		presetName = orFirst(d.PresetName, presetNames)
+		bpmStr     = ""
+		still      = d.Still
 	)
-	if d.BPM > 0 {
+	switch {
+	case d.AutoBPM:
+		bpmStr = "auto"
+	case d.BPM > 0:
 		bpmStr = strconv.Itoa(d.BPM)
 	}
-	is := func(s string) func() bool { return func() bool { return styleName == s } }
+	if len(imageFiles) == 1 {
+		imagePaths = imageFiles
+	}
 	isNot := func(s string) func() bool { return func() bool { return styleName != s } }
 
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Style").
-				Options(styleOptions(len(imageFiles))...).
+				Options(styleOptions()...).
 				Value(&styleName),
 			huh.NewSelect[string]().
 				Title("Audio file").
@@ -103,19 +107,13 @@ func Run(d Defaults) (*Choices, error) {
 				Value(&audioPath),
 		),
 		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Image file").
-				Options(fileOptions(imageFiles)...).
-				Value(&imagePath),
-		).WithHideFunc(is(StyleCycle)),
-		huh.NewGroup(
 			huh.NewMultiSelect[string]().
-				Title("Images to cycle through").
-				Description("space to toggle, at least 2").
+				Title("Images").
+				Description("space to toggle, at least 1 — with several, the clip switches between them\n(train: one per car, in order)").
 				Options(fileOptions(imageFiles)...).
-				Validate(validateCycleImages).
-				Value(&cyclePaths),
-		).WithHideFunc(isNot(StyleCycle)),
+				Validate(validateImages).
+				Value(&imagePaths),
+		),
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Grid size").
@@ -125,9 +123,14 @@ func Run(d Defaults) (*Choices, error) {
 		).WithHideFunc(isNot(StyleGrid)),
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Profile").
-				Options(profileOptions()...).
-				Value(&profileName),
+				Title("Tiles").
+				Options(
+					huh.NewOption("same    every tile shows the same image, switching together", "same"),
+					huh.NewOption("mixed   a different image in each tile, each switching on its own", "mixed"),
+				).
+				Value(&tiles),
+		).WithHideFunc(func() bool { return styleName != StyleGrid || len(imagePaths) < 2 }),
+		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Preset").
 				Options(presetOpts...).
@@ -136,8 +139,8 @@ func Run(d Defaults) (*Choices, error) {
 		huh.NewGroup(
 			huh.NewInput().
 				Title("BPM").
-				Description("Tempo-synced animations — leave blank to disable").
-				Placeholder("e.g. 140").
+				Description("Tempo-synced animations — \"auto\" detects it, blank disables").
+				Placeholder("e.g. 140, or auto").
 				Validate(validateBPM).
 				Value(&bpmStr),
 			huh.NewConfirm().
@@ -154,47 +157,37 @@ func Run(d Defaults) (*Choices, error) {
 		return nil, err
 	}
 
-	bpm := 0
-	if bpmStr != "" {
+	bpm, autoBPM := 0, bpmStr == "auto"
+	if bpmStr != "" && !autoBPM {
 		bpm, _ = strconv.Atoi(bpmStr)
 	}
 	gridN, _ := strconv.Atoi(gridStr)
 
-	images := []string{imagePath}
-	if styleName == StyleCycle {
-		images = cyclePaths
-	}
-
 	return &Choices{
-		Style:       styleName,
-		AudioPath:   audioPath,
-		ImagePaths:  images,
-		ProfileName: profileName,
-		PresetName:  presetName,
-		BPM:         bpm,
-		Still:       still,
-		GridN:       gridN,
+		Style:      styleName,
+		AudioPath:  audioPath,
+		ImagePaths: imagePaths,
+		PresetName: presetName,
+		BPM:        bpm,
+		AutoBPM:    autoBPM,
+		Still:      still,
+		GridN:      gridN,
+		Tiles:      tiles,
 	}, nil
 }
 
-// styleOptions lists the styles; cycle is offered only when there are at
-// least two images to cycle through.
-func styleOptions(nImages int) []huh.Option[string] {
-	opts := []huh.Option[string]{
-		huh.NewOption("single   one image, gently moving", StyleSingle),
-	}
-	if nImages >= 2 {
-		opts = append(opts, huh.NewOption("cycle    jump between images at random", StyleCycle))
-	}
-	return append(opts,
+// styleOptions lists the styles.
+func styleOptions() []huh.Option[string] {
+	return []huh.Option[string]{
+		huh.NewOption("single   the image gently moving (several: switching between them)", StyleSingle),
 		huh.NewOption("grid     the image tiled N×N", StyleGrid),
 		huh.NewOption("train    copies fly past on the left", StyleTrain),
-	)
+	}
 }
 
-func validateCycleImages(paths []string) error {
-	if len(paths) < 2 {
-		return errors.New("pick at least 2 images")
+func validateImages(paths []string) error {
+	if len(paths) < 1 {
+		return errors.New("pick at least 1 image")
 	}
 	return nil
 }
@@ -225,17 +218,6 @@ func fileOptions(files []string) []huh.Option[string] {
 	opts := make([]huh.Option[string], len(files))
 	for i, f := range files {
 		opts[i] = huh.NewOption(f, f)
-	}
-	return opts
-}
-
-func profileOptions() []huh.Option[string] {
-	names := profile.Names()
-	opts := make([]huh.Option[string], len(names))
-	for i, name := range names {
-		p, _ := profile.Get(name)
-		label := fmt.Sprintf("%-22s %dx%d", name, p.Width, p.Height)
-		opts[i] = huh.NewOption(label, name)
 	}
 	return opts
 }
@@ -278,12 +260,12 @@ func orFirst(want string, options []string) string {
 }
 
 func validateBPM(s string) error {
-	if s == "" {
+	if s == "" || s == "auto" {
 		return nil
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil || n <= 0 {
-		return errors.New("enter a positive number or leave blank")
+		return errors.New(`enter a positive number, "auto", or leave blank`)
 	}
 	return nil
 }

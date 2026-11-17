@@ -53,6 +53,29 @@ func TestGetDurationErrors(t *testing.T) {
 	}
 }
 
+func TestDecodeMono(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	// 1.0 and -0.5 as little-endian float32.
+	fakeTool(t, "ffmpeg", `printf '%s\n' "$@" > `+argsFile+"\n"+`printf '\000\000\200\077\000\000\000\277'`+"\n")
+	got, err := DecodeMono("a.mp3", 11025, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != 1 || got[1] != -0.5 {
+		t.Errorf("samples = %v", got)
+	}
+	raw, _ := os.ReadFile(argsFile)
+	if args := strings.Join(strings.Fields(string(raw)), " "); !strings.Contains(args, "-i a.mp3 -t 300.000 -vn -ac 1 -ar 11025 -f f32le pipe:1") {
+		t.Errorf("args = %s", args)
+	}
+}
+
+func TestDecodeMonoError(t *testing.T) {
+	fakeTool(t, "ffmpeg", "echo 'a.mp3: No such file or directory' >&2\nexit 1\n")
+	_, err := DecodeMono("a.mp3", 11025, 300)
+	assertErrContains(t, err, "ffmpeg failed", "No such file")
+}
+
 func TestRenderSuccessAndArgs(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	fakeTool(t, "ffmpeg", `printf '%s\n' "$@" > `+argsFile+"\n")

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nothinglefttolearn/nltl-clip/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
 )
 
 func TestGridFilter(t *testing.T) {

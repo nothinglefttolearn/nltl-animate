@@ -31,10 +31,12 @@ func TestIntegrationRenderEveryStyle(t *testing.T) {
 		out  string
 		w, h int
 	}{
-		{"single", []string{audio, red}, "tone_instagram_square_preview.mp4", 1080, 1080},
-		{"grid", []string{"grid", "--n", "3", "-p", "youtube", audio, red}, "tone_youtube_grid3_preview.mp4", 1920, 1080},
-		{"cycle", []string{"cycle", "--seed", "1", "-p", "instagram-story", audio, red, blue}, "tone_instagram_story_cycle_preview.mp4", 1080, 1920},
-		{"train", []string{"train", "--bpm", "140", audio, half}, "tone_instagram_square_train_preview.mp4", 1080, 1080},
+		{"single", []string{audio, red}, "tone_single_preview.mp4", 1080, 1080},
+		{"grid", []string{"grid", "--n", "3", audio, red}, "tone_grid3_preview.mp4", 1080, 1080},
+		{"several images", []string{"--seed", "1", audio, red, blue}, "tone_cycle_preview.mp4", 1080, 1080},
+		{"grid same", []string{"grid", "--n", "2", "--bpm", "120", audio, red, blue}, "tone_grid2_preview.mp4", 1080, 1080},
+		{"grid mixed", []string{"grid", "--n", "3", "--tiles", "mixed", audio, red, blue, half}, "tone_grid3_mixed_preview.mp4", 1080, 1080},
+		{"train", []string{"train", "--bpm", "140", audio, half}, "tone_train_preview.mp4", 1080, 1080},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
