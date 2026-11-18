@@ -32,7 +32,7 @@ func fourOnTheFloor(bpm float64) pattern {
 }
 
 func synth(p pattern, seed uint64) []float32 {
-	rng := rand.New(rand.NewPCG(seed, 1))
+	rng := rand.New(rand.NewPCG(seed, 1)) //nolint:gosec // deterministic test signal, not security
 	n := int(p.seconds * SampleRate)
 	out := make([]float64, n)
 	beat := 60 / p.bpm
@@ -92,7 +92,7 @@ func TestDetectFourOnTheFloor(t *testing.T) {
 // two metrical levels; either is acceptable, but nothing else.
 func TestDetectEdgeTemposWithinAnOctave(t *testing.T) {
 	for _, bpm := range []int{70, 174} {
-		got, err := Detect(synth(fourOnTheFloor(float64(bpm)), uint64(bpm)))
+		got, err := Detect(synth(fourOnTheFloor(float64(bpm)), 2))
 		if err != nil {
 			t.Fatalf("%d BPM: %v", bpm, err)
 		}

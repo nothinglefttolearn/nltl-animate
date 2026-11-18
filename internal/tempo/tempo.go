@@ -72,7 +72,7 @@ const minBeatContrast = 2
 // than on the same grid at an arbitrary phase.
 func clearBeat(env []float64, bpm float64) bool {
 	period := 60 / bpm * envRate
-	_, best := bestPhase(env, bpm)
+	best := bestPhaseScore(env, bpm)
 	var sum float64
 	n := 0
 	for p := 0.0; p < period; p += 0.5 {
@@ -225,7 +225,7 @@ func fineTempo(env []float64, coarse float64) int {
 	c := int(math.Round(coarse))
 	best, bestScore := c, -1.0
 	for bpm := max(MinBPM, c-2); bpm <= min(MaxBPM, c+2); bpm++ {
-		if _, s := bestPhase(env, float64(bpm)); s > bestScore {
+		if s := bestPhaseScore(env, float64(bpm)); s > bestScore {
 			best, bestScore = bpm, s
 		}
 	}
@@ -258,16 +258,15 @@ func fft(x []complex128) {
 	}
 }
 
-// bestPhase finds the phase (in envelope frames) at which the beat grid at
-// bpm collects the most onset strength, and that strength.
-func bestPhase(env []float64, bpm float64) (phase, score float64) {
+// bestPhaseScore is the most onset strength the beat grid at bpm collects
+// over all phases.
+func bestPhaseScore(env []float64, bpm float64) float64 {
 	period := 60 / bpm * envRate
+	var best float64
 	for p := 0.0; p < period; p += 0.5 {
-		if s := phaseScore(env, period, p); s > score {
-			phase, score = p, s
-		}
+		best = max(best, phaseScore(env, period, p))
 	}
-	return phase, score
+	return best
 }
 
 // phaseScore is the mean of the envelope's local maxima on the grid phase,
