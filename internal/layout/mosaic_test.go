@@ -1,4 +1,4 @@
-package style
+package layout
 
 import (
 	"bytes"
@@ -9,7 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 )
 
 func TestMosaicSequenceRules(t *testing.T) {
@@ -121,11 +122,12 @@ func TestNewMosaicErrors(t *testing.T) {
 func must(_ *Mosaic, err error) error { return err }
 
 func TestMosaicFilter(t *testing.T) {
-	p, _ := preset.Get("industrial")
-	f := MosaicFilter(p, 1920, 1080, 3, 120)
+	m, _ := motion.Get("steady")
+	g, _ := grade.Get("muted")
+	f := MosaicFilter(m, g, 1920, 1080, 3, 120)
 	tw, th := GridTileSize(1920, 1080, 3)
 	if !strings.HasPrefix(f, "split=9[s0]") {
-		t.Errorf("should start by splitting the unlabelled input: %.60s", f)
+		t.Errorf("should start by splitting the unlabeled input: %.60s", f)
 	}
 	for i := range 9 {
 		want := fmt.Sprintf("[s%d]crop=%d:%d:%d:%d,", i, tw, th, (i%3)*tw, (i/3)*th)
@@ -133,16 +135,16 @@ func TestMosaicFilter(t *testing.T) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Count(f, "zoompan") != 9 || strings.Count(f, p.MotionFilter(tw, th, 120)) != 9 {
+	if strings.Count(f, "zoompan") != 9 || strings.Count(f, m.MoveFilter(tw, th, 120)) != 9 {
 		t.Error("every tile should get the same motion")
 	}
 	if strings.Count(f, "vignette") != 1 || !strings.Contains(f, "xstack=inputs=9:grid=3x3,scale=1920:1080,setsar=1,") {
 		t.Errorf("grade should run once over the stacked grid: %s", f)
 	}
 	if strings.HasSuffix(f, "]") {
-		t.Error("output must be unlabelled")
+		t.Error("output must be unlabeled")
 	}
-	if MosaicFilter(p, 1920, 1080, 1, 120) != p.BuildFilter(1920, 1080, 120) {
+	if MosaicFilter(m, g, 1920, 1080, 1, 120) != Filter(m, g, 1920, 1080, 120) {
 		t.Error("1x1 should be the plain filter")
 	}
 }

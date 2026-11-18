@@ -1,4 +1,4 @@
-package style
+package layout
 
 import (
 	"cmp"
@@ -108,7 +108,7 @@ func TrainLoopFrames(o TrainOptions, nImages, minFrames int) int {
 const fadeInFraction = 0.15
 
 // Train renders copies of one or more images on a straight track to the
-// viewer's left, travelling towards and past the camera. With several images,
+// viewer's left, traveling toward and past the camera. With several images,
 // consecutive cars show them in turn (0, 1, 2, ..., 0, 1, ...), so a
 // different image passes on every step. It implements ffmpeg.FrameSource.
 //

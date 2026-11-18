@@ -46,7 +46,7 @@ func Cover(img image.Image, w, h int) *image.RGBA {
 	b := img.Bounds()
 	sw, sh := b.Dx(), b.Dy()
 
-	// Source rectangle with the target aspect ratio, centred.
+	// Source rectangle with the target aspect ratio, centered.
 	src := b
 	if sw*h > sh*w { // source is wider: trim left/right
 		cw := sh * w / h

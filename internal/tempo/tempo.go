@@ -83,7 +83,7 @@ func clearBeat(env []float64, bpm float64) bool {
 }
 
 // bands splits the spectrum for the onset envelope: kick, body, and
-// cymbals/noise. Each band's flux is normalised separately, then the low
+// cymbals/noise. Each band's flux is normalized separately, then the low
 // band is weighted up, because in most music the kick carries the beat
 // while hi-hats and noise would otherwise dominate a broadband sum.
 var bands = []struct {
@@ -271,7 +271,7 @@ func bestPhaseScore(env []float64, bpm float64) float64 {
 
 // phaseScore is the mean of the envelope's local maxima on the grid phase,
 // phase+period, ... Taking the maximum within ±1 frame tolerates timing
-// jitter and frame quantisation without letting a wrong tempo stay aligned
+// jitter and frame quantization without letting a wrong tempo stay aligned
 // for long, since small tempo errors accumulate along the track.
 func phaseScore(env []float64, period, phase float64) float64 {
 	const tol = 1

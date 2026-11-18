@@ -1,29 +1,39 @@
-# nltl-animate custom preset config
-# Usage: nltl-animate --config nltl.yaml --preset my-preset audio.wav cover.jpg
+# nltl-animate custom grades and motions
+# Usage: nltl-animate --config nltl.yaml --grade my-grade --motion slow-breath audio.wav cover.jpg
 #
-# Each preset starts from another preset and only overrides the fields
-# listed. `extends` defaults to "industrial"; it can name a built-in
-# (industrial, clean, dark) or a custom preset defined earlier in this file.
+# A grade is how the picture looks; a motion is how it moves with the beat.
+# They are chosen separately.
+#
+# Each entry starts from another of the same kind and only overrides the
+# dials listed. `extends` defaults to "muted" for grades and "steady" for
+# motions; it can name a built-in or a custom one defined earlier in this
+# file. A custom one with a built-in's name replaces the built-in.
 #
 # Unknown keys and out-of-range values are rejected when the file is loaded.
 
-presets:
-  - name: my-preset
-    description: Custom preset for NLTL releases
-    extends: industrial
-    zoom_base: 1.02          # base zoom level (1–10)
-    zoom_amp: 0.01           # zoom oscillation amplitude (>= 0)
-    zoom_beats: 8.0          # beats per zoom breath cycle (> 0)
-    jitter_amp: 2.0          # pixel micro-jitter amount (>= 0)
-    blur_sigma: 0.6          # gaussian blur, 0 = sharp (0–1024)
-    contrast: 1.15           # image contrast, 1 = unchanged (-1000–1000)
-    saturation: 0.7          # colour saturation, 0 = monochrome, 1 = full (0–3)
-    brightness_amp: 0.02     # brightness pulse amplitude (0–1)
-    brightness_beats: 4.0    # beats per brightness pulse cycle (> 0)
-    vignette_fraction: 0.167 # vignette angle as a fraction of PI; 0.167 = PI/6 (0–0.5)
-    grain_strength: 25       # noise/grain intensity (0–100)
+# Grade dials are percentages; 0 leaves the image untouched.
+grades:
+  - name: my-grade
+    description: Custom grade for NLTL releases
+    extends: muted
+    contrast: 15     # % change: +15 is punchier, -20 flatter (-100 to 100)
+    saturation: -30  # % change: -100 is black and white (-100 to 100)
+    softness: 6      # blur: 0 sharp, 100 heavily smeared (0 to 100)
+    vignette: 33     # corner darkening: 0 none, 100 strongest (0 to 100)
+    grain: 25        # film grain: 0 clean, 100 very heavy (0 to 100)
 
   # Only override what differs; everything else comes from `dark`.
   - name: my-darker
     extends: dark
-    contrast: 1.4
+    contrast: 40
+
+# Motion strengths are percentages of the frame; rates are in beats.
+# Without --bpm the beats run at 120 BPM.
+motions:
+  - name: slow-breath
+    extends: gentle
+    breath: 2          # how far the frame zooms in and out, % (0 to 50)
+    breath_beats: 16   # beats per breath (> 0)
+    shake: 0.1         # how far the frame drifts and jitters, % (0 to 10)
+    pulse: 1           # how much brightness swells, % (0 to 100)
+    pulse_beats: 8     # beats per pulse (> 0)

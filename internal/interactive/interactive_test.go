@@ -4,19 +4,27 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 )
 
-func TestPresetOptions(t *testing.T) {
-	custom := []preset.Preset{{Name: "mine"}, {Name: "dark"}, {Name: "mine"}}
-	opts, names := presetOptions(custom)
+func TestNamedOptions(t *testing.T) {
+	custom := []grade.Grade{{Name: "mine"}, {Name: "dark"}, {Name: "mine"}}
+	opts, names := namedOptions(custom, grade.Names(), grade.Get,
+		func(g grade.Grade) (string, string) { return g.Name, g.Description })
 
-	want := []string{"mine", "dark", "clean", "industrial"}
+	want := []string{"mine", "dark", "clean", "muted"}
 	if !slices.Equal(names, want) {
 		t.Errorf("names = %v, want %v", names, want)
 	}
 	if len(opts) != len(names) {
 		t.Errorf("got %d options for %d names", len(opts), len(names))
+	}
+
+	_, names = namedOptions(nil, motion.Names(), motion.Get,
+		func(m motion.Motion) (string, string) { return m.Name, m.Description })
+	if !slices.Equal(names, []string{"gentle", "restless", "steady", "still"}) {
+		t.Errorf("motion names = %v", names)
 	}
 }
 
@@ -38,13 +46,13 @@ func TestValidateBPM(t *testing.T) {
 	}
 }
 
-func TestStyleOptions(t *testing.T) {
+func TestLayoutOptions(t *testing.T) {
 	var got []string
-	for _, o := range styleOptions() {
+	for _, o := range layoutOptions() {
 		got = append(got, o.Value)
 	}
-	if !slices.Equal(got, []string{StyleSingle, StyleGrid, StyleTrain}) {
-		t.Errorf("styles = %v", got)
+	if !slices.Equal(got, []string{LayoutSingle, LayoutGrid, LayoutTrain}) {
+		t.Errorf("layouts = %v", got)
 	}
 }
 

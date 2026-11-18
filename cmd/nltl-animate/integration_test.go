@@ -62,7 +62,7 @@ func TestIntegrationNoAudioLoops(t *testing.T) {
 	}
 }
 
-func TestIntegrationRenderEveryStyle(t *testing.T) {
+func TestIntegrationRenderEveryLayout(t *testing.T) {
 	dir := t.TempDir()
 	audio := filepath.Join(dir, "tone.wav")
 	if out, err := exec.Command("ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=f=220:d=1",
