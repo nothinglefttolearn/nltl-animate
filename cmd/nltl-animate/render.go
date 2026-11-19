@@ -65,10 +65,13 @@ type renderOptions struct {
 	OutputDir  string
 	ConfigPath string
 
-	// switching between several images (single and grid)
+	// switching between several images, or tints (single and grid)
 	Hold      int     // frames per image; 0 = default (see holdFrames)
 	HoldBeats float64 // beats per image; 0 = default
-	Seed      uint64  // 0 = pick one at render time
+	Seed      uint64  // image order and tints; 0 = pick one at render time
+
+	// Tinted is whether the motion has a tint; renderClip fills it in.
+	Tinted bool
 
 	// grid
 	GridN int
@@ -206,6 +209,19 @@ func (o *renderOptions) switches() bool {
 	return len(o.ImagePaths) > 1 && o.Layout != layoutTrain
 }
 
+// steps reports whether the clip moves through new appearances every hold:
+// switching images, or a tint giving even a single image a new cast on
+// every switch. (Train has its own pace.)
+func (o *renderOptions) steps() bool {
+	return o.switches() || o.Tinted && o.Layout != layoutTrain
+}
+
+// seeded reports whether the clip uses the random seed: for the image order
+// or the tints.
+func (o *renderOptions) seeded() bool {
+	return o.switches() || o.Tinted
+}
+
 // holdFrames is how many frames each image shows: --hold-beats, then
 // --hold, then one beat when the BPM is known, else defaultHoldFrames.
 func (o *renderOptions) holdFrames() int {
@@ -306,9 +322,10 @@ func (o *renderOptions) confirmOverwrite(path string) error {
 
 // loopFrames is the length of a silent clip, chosen so it loops seamlessly:
 // one pass through the image sequence (each image once, or for train one
-// image cycle of the cars), or oneImageLoopSeconds with a single image. The
-// motion's breath and shake are not matched up at the loop point; they are
-// jumpy anyway.
+// image cycle of the cars), or oneImageLoopSeconds with a single image
+// (rounded up to whole switches when it is tinted). The tints repeat with
+// the loop. The motion's breath and shake are not matched up at the loop
+// point; they are jumpy anyway.
 func (o *renderOptions) loopFrames() int {
 	oneImage := oneImageLoopSeconds * video.FPS
 	switch {
@@ -318,6 +335,9 @@ func (o *renderOptions) loopFrames() int {
 		return layout.TrainLoopFrames(o.Train, 1, oneImage)
 	case o.switches():
 		return len(o.ImagePaths) * o.holdFrames()
+	case o.steps():
+		hold := o.holdFrames()
+		return max(2, (oneImage+hold-1)/hold) * hold
 	default:
 		return oneImage
 	}
@@ -328,20 +348,25 @@ func (o *renderOptions) loopFrames() int {
 func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Options, error) {
 	w, h := video.Size, video.Size
 	switch {
-	case o.Layout == layoutGrid && !o.switches():
+	case o.Layout == layoutGrid && !o.steps():
 		return ffmpeg.Options{ImagePath: o.ImagePaths[0], Filter: layout.GridFilter(m, g, w, h, o.GridN, o.BPM)}, nil
 
-	case o.Layout == layoutGrid && o.Tiles == tilesMixed:
+	// Mixed tiles, or tinted tiles that each need their own cast.
+	case o.Layout == layoutGrid && (o.Tiles == tilesMixed && o.switches() || o.Tinted):
 		tw, th := layout.GridTileSize(w, h, o.GridN)
 		imgs, err := loadCovered(o.ImagePaths, tw, th)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		src, err := layout.NewMosaic(imgs, o.GridN, o.holdFrames(), o.Seed)
+		newMosaic := layout.NewSameMosaic
+		if o.Tiles == tilesMixed && o.switches() {
+			newMosaic = layout.NewMosaic
+		}
+		src, err := newMosaic(imgs, o.GridN, o.holdFrames(), o.Seed)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		src.Loop = o.NoAudio
+		src.Loop, src.Tint = o.NoAudio, m.Tinter(o.Seed)
 		return ffmpeg.Options{Frames: src, Filter: layout.MosaicFilter(m, g, w, h, o.GridN, o.BPM)}, nil
 
 	case o.Layout == layoutGrid: // same image in every tile, switching together
@@ -357,7 +382,7 @@ func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Optio
 		src.Loop = o.NoAudio
 		return ffmpeg.Options{Frames: src, Filter: layout.GridFilter(m, g, w, h, o.GridN, o.BPM)}, nil
 
-	case o.Layout == layoutSingle && o.switches():
+	case o.Layout == layoutSingle && o.steps():
 		imgs, err := loadCovered(o.ImagePaths, w, h)
 		if err != nil {
 			return ffmpeg.Options{}, err
@@ -366,7 +391,7 @@ func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Optio
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		src.Loop = o.NoAudio
+		src.Loop, src.Tint = o.NoAudio, m.Tinter(o.Seed)
 		return ffmpeg.Options{Frames: src, Filter: layout.Filter(m, g, w, h, o.BPM)}, nil
 
 	case o.Layout == layoutTrain:
@@ -381,6 +406,7 @@ func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Optio
 			imgs = append(imgs, frames.ToRGBA(img))
 		}
 		train := o.Train
+		train.Tint = m.Tinter(o.Seed)
 		if o.NoAudio {
 			train.LoopFrames = o.loopFrames()
 		}
@@ -413,12 +439,17 @@ func loadCovered(paths []string, w, h int) ([]*image.RGBA, error) {
 func (o *renderOptions) layoutSummary() string {
 	switch o.Layout {
 	case layoutSingle:
-		if o.switches() {
+		switch {
+		case o.switches():
 			return fmt.Sprintf("single — %d images, new image %s (seed %d)", len(o.ImagePaths), o.holdSummary(), o.Seed)
+		case o.Tinted:
+			return fmt.Sprintf("single — new tint %s (seed %d)", o.holdSummary(), o.Seed)
 		}
 	case layoutGrid:
 		grid := fmt.Sprintf("grid — %d×%d", o.GridN, o.GridN)
 		switch {
+		case !o.switches() && o.Tinted:
+			return fmt.Sprintf("%s, a new tint in every tile %s (seed %d)", grid, o.holdSummary(), o.Seed)
 		case !o.switches():
 			return grid
 		case o.Tiles == tilesMixed:
@@ -435,6 +466,9 @@ func (o *renderOptions) layoutSummary() string {
 			rate = "one per beat"
 		case o.BPM > 0:
 			rate = fmt.Sprintf("one every %s beats", fmtFloat(o.Train.Beats))
+		}
+		if o.Tinted {
+			rate += fmt.Sprintf(", a tint per car (seed %d)", o.Seed)
 		}
 		if n := len(o.ImagePaths); n > 1 {
 			return fmt.Sprintf("train — %d copies cycling %d images, %s", o.Train.Copies, n, rate)
@@ -460,8 +494,8 @@ func (o *renderOptions) holdSummary() string {
 
 // headlessCommand returns the flag-driven invocation equivalent to o. Layout
 // flags are included only when they differ from the defaults; the grade,
-// motion and switching seed are always included so the clip can be
-// reproduced.
+// motion and seed (when the image order or tints use it) are always included
+// so the clip can be reproduced.
 func (o *renderOptions) headlessCommand() string {
 	d := defaultRenderOptions()
 	parts := []string{"nltl-animate"}
@@ -490,11 +524,11 @@ func (o *renderOptions) headlessCommand() string {
 			parts = append(parts, name, value)
 		}
 	}
-	if o.switches() {
+	if o.steps() {
 		flagIf(o.Hold != d.Hold, "--hold", strconv.Itoa(o.Hold))
 		flagIf(o.HoldBeats != d.HoldBeats, "--hold-beats", fmtFloat(o.HoldBeats))
-		flagIf(o.Seed != 0, "--seed", strconv.FormatUint(o.Seed, 10))
 	}
+	flagIf(o.seeded() && o.Seed != 0, "--seed", strconv.FormatUint(o.Seed, 10))
 	switch o.Layout {
 	case layoutGrid:
 		flagIf(true, "--n", strconv.Itoa(o.GridN))
@@ -551,10 +585,6 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 		}
 		o.BPM, o.Train.BPM = bpm, bpm
 	}
-	if o.switches() && o.Seed == 0 {
-		o.Seed = rand.Uint64() | 1 //nolint:gosec // visual randomness; |1 keeps it non-zero
-	}
-
 	g, err := resolveGrade(o.GradeName, cfg)
 	if err != nil {
 		return err
@@ -562,6 +592,10 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	m, err := resolveMotion(o.MotionName, cfg)
 	if err != nil {
 		return err
+	}
+	o.Tinted = m.Tint > 0
+	if o.seeded() && o.Seed == 0 {
+		o.Seed = rand.Uint64() | 1 //nolint:gosec // visual randomness; |1 keeps it non-zero
 	}
 
 	var duration float64

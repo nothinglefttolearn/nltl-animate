@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/nothinglefttolearn/nltl-animate/internal/frames"
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
@@ -34,6 +35,9 @@ type TrainOptions struct {
 	// frames: the speed is nudged so a whole number of image cycles pass in
 	// that time. See TrainLoopFrames.
 	LoopFrames int
+
+	// Tint gives every car its own cast for its whole trip.
+	Tint motion.Tinter
 }
 
 func DefaultTrainOptions() TrainOptions {
@@ -128,6 +132,8 @@ type Train struct {
 	near     float64 // depth at which a copy wraps to the back
 	length   float64 // track length in depth: Copies * Spacing
 	velocity float64 // world units per second
+
+	castPeriod int // cars per loop, so the casts repeat with it; 0 = no loop
 }
 
 // trainImage is one image on the train, ready to draw.
@@ -187,7 +193,9 @@ func NewTrain(imgs []image.Image, w, h int, opts TrainOptions) (*Train, error) {
 		// LoopFrames is identical to frame 0.
 		loopSec := float64(opts.LoopFrames) / video.FPS
 		n := float64(len(imgs))
-		perSecond = max(1, math.Round(loopSec*perSecond/n)) * n / loopSec
+		cycles := max(1, math.Round(loopSec*perSecond/n))
+		perSecond = cycles * n / loopSec
+		t.castPeriod = int(cycles) * len(imgs)
 	}
 	t.velocity = perSecond * opts.Spacing
 	return t, nil
@@ -195,10 +203,13 @@ func NewTrain(imgs []image.Image, w, h int, opts TrainOptions) (*Train, error) {
 
 func (t *Train) Size() (int, int) { return t.w, t.h }
 
-// copyState is one copy's depth, opacity and image at a moment in time.
+// copyState is one copy's depth, opacity, image and cast at a moment in
+// time.
 type copyState struct {
 	z, alpha float64
+	car      int // which car of the endless train this copy is right now
 	img      int // index into Train.imgs
+	cast     motion.Cast
 }
 
 // copies returns every copy at time sec, sorted far to near (draw order).
@@ -220,7 +231,10 @@ func (t *Train) copies(sec float64) []copyState {
 		n := k - int(wraps)*t.opts.Copies
 		frac := d / t.length // 0 = nearest, 1 = farthest
 		alpha := (1 - t.opts.Fog*frac) * clamp01((1-frac)/fadeInFraction)
-		cs[k] = copyState{z: t.near + d, alpha: alpha, img: posMod(n, len(t.imgs))}
+		cs[k] = copyState{
+			z: t.near + d, alpha: alpha, car: n,
+			img: posMod(n, len(t.imgs)), cast: t.opts.Tint.Cast(n, t.castPeriod),
+		}
 	}
 	slices.SortFunc(cs, func(a, b copyState) int { return cmp.Compare(b.z, a.z) }) // far first
 	return cs
@@ -249,7 +263,7 @@ func (t *Train) RenderFrame(dst *image.RGBA, i int) {
 		if left+width < 0 || left > float64(t.w) || height < 0.5 {
 			continue
 		}
-		drawBilinear(dst, img.mipFor(height), left, top, width, height, c.alpha)
+		drawBilinear(dst, img.mipFor(height), left, top, width, height, c.alpha, gains(c.cast))
 	}
 }
 
@@ -333,10 +347,11 @@ func halve(src *image.RGBA) *image.RGBA {
 }
 
 // drawBilinear composites src, scaled to the sub-pixel rectangle
-// (left, top, width, height), over dst with an extra opacity. Both images
-// are premultiplied RGBA. Samples outside src are transparent, which
-// anti-aliases the copy's edges.
-func drawBilinear(dst, src *image.RGBA, left, top, width, height, opacity float64) {
+// (left, top, width, height), over dst with an extra opacity and a gain per
+// color channel (the tint; noTint for none). Both images are premultiplied
+// RGBA. Samples outside src are transparent, which anti-aliases the copy's
+// edges.
+func drawBilinear(dst, src *image.RGBA, left, top, width, height, opacity float64, tint [3]float32) {
 	sw, sh := src.Bounds().Dx(), src.Bounds().Dy()
 	db := dst.Bounds()
 	x0 := max(db.Min.X, int(math.Floor(left)))
@@ -350,6 +365,7 @@ func drawBilinear(dst, src *image.RGBA, left, top, width, height, opacity float6
 	sx := float64(sw) / width
 	sy := float64(sh) / height
 	op := float32(opacity)
+	opR, opG, opB := op*tint[0], op*tint[1], op*tint[2]
 
 	texel := func(x, y int) (r, g, b, a float32) {
 		if x < 0 || y < 0 || x >= sw || y >= sh {
@@ -381,9 +397,10 @@ func drawBilinear(dst, src *image.RGBA, left, top, width, height, opacity float6
 			if a <= 0 {
 				continue
 			}
-			r := (r00*w00 + r10*w10 + r01*w01 + r11*w11) * op
-			g := (g00*w00 + g10*w10 + g01*w01 + g11*w11) * op
-			b := (b00*w00 + b10*w10 + b01*w01 + b11*w11) * op
+			// A tinted channel can pass its alpha; to8 clamps it.
+			r := (r00*w00 + r10*w10 + r01*w01 + r11*w11) * opR
+			g := (g00*w00 + g10*w10 + g01*w01 + g11*w11) * opG
+			b := (b00*w00 + b10*w10 + b01*w01 + b11*w11) * opB
 
 			// Premultiplied "over": dst = src + dst*(1-srcAlpha).
 			k := 1 - a/255

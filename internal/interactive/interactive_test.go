@@ -23,7 +23,7 @@ func TestNamedOptions(t *testing.T) {
 
 	_, names = namedOptions(nil, motion.Names(), motion.Get,
 		func(m motion.Motion) (string, string) { return m.Name, m.Description })
-	if !slices.Equal(names, []string{"gentle", "restless", "steady", "still"}) {
+	if !slices.Equal(names, []string{"gentle", "restless", "shifting", "steady", "still"}) {
 		t.Errorf("motion names = %v", names)
 	}
 }

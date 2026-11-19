@@ -2,28 +2,37 @@ package layout
 
 import (
 	"errors"
-	"fmt"
 	"image"
 	"io"
 	"math/rand/v2"
+	"slices"
+
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 )
 
 // Mosaic is an n x n grid in which every tile shows its own image sequence.
 // All tiles switch together every hold frames; at each switch every tile
 // moves to a different image than it showed before, and, when there are at
 // least as many images as tiles, no two tiles show the same image at once.
+// A same mosaic (NewSameMosaic) instead shows one image in every tile at a
+// time, in the order of Sequence. With a tint, each tile at each switch is a
+// new appearance with its own cast.
 // It implements ffmpeg.FrameSource; frames are n tiles wide and high, with
 // no gaps (see MosaicFilter for the per-tile motion).
 type Mosaic struct {
-	// Loop makes the grid repeat after one step per image: see
-	// MosaicLoopSequence.
+	// Loop makes the grid repeat: after one step per image (see
+	// MosaicLoopSequence and LoopSequence), or with a single image after
+	// the frames asked for. The casts then repeat with the clip.
 	Loop bool
+	// Tint gives every tile its own cast at every switch.
+	Tint motion.Tinter
 
 	n      int
 	tw, th int
 	images []*image.RGBA
 	hold   int
 	seed   uint64
+	same   bool
 }
 
 // NewMosaic takes images that are already the tile size (see frames.Cover).
@@ -31,19 +40,31 @@ func NewMosaic(imgs []*image.RGBA, n, hold int, seed uint64) (*Mosaic, error) {
 	if len(imgs) < 2 {
 		return nil, errors.New("mixed tiles need at least 2 images")
 	}
+	return newMosaic(imgs, n, hold, seed, false)
+}
+
+// NewSameMosaic is a mosaic with the same image in every tile, switching
+// together. It differs from the plain grid only with a tint, which gives
+// every tile its own cast.
+func NewSameMosaic(imgs []*image.RGBA, n, hold int, seed uint64) (*Mosaic, error) {
+	if len(imgs) < 1 {
+		return nil, errors.New("grid needs at least 1 image")
+	}
+	return newMosaic(imgs, n, hold, seed, true)
+}
+
+func newMosaic(imgs []*image.RGBA, n, hold int, seed uint64, same bool) (*Mosaic, error) {
 	if n < 1 {
 		return nil, errors.New("grid must be at least 1x1")
 	}
 	if hold < 1 {
 		return nil, errors.New("hold must be at least 1 frame")
 	}
-	b := imgs[0].Bounds()
-	for i, img := range imgs {
-		if img.Bounds() != b || img.Stride != 4*b.Dx() {
-			return nil, fmt.Errorf("mosaic image %d is %v, want tightly packed %v", i, img.Bounds(), b)
-		}
+	b, err := sameSize("mosaic", imgs)
+	if err != nil {
+		return nil, err
 	}
-	return &Mosaic{n: n, tw: b.Dx(), th: b.Dy(), images: imgs, hold: hold, seed: seed}, nil
+	return &Mosaic{n: n, tw: b.Dx(), th: b.Dy(), images: imgs, hold: hold, seed: seed, same: same}, nil
 }
 
 func (m *Mosaic) Size() (int, int) { return m.n * m.tw, m.n * m.th }
@@ -51,15 +72,27 @@ func (m *Mosaic) Size() (int, int) { return m.n * m.tw, m.n * m.th }
 func (m *Mosaic) WriteFrames(w io.Writer, n int) error {
 	fw, fh := m.Size()
 	frame := image.NewRGBA(image.Rect(0, 0, fw, fh))
+	nTiles := m.n * m.n
+	nSteps := (n + m.hold - 1) / m.hold
 	var steps [][]int
-	if m.Loop {
-		steps = MosaicLoopSequence(len(m.images), m.n*m.n, m.seed)
-	} else {
-		steps = MosaicSequence(len(m.images), m.n*m.n, (n+m.hold-1)/m.hold, m.seed)
+	switch {
+	case m.same:
+		seq := Sequence
+		if m.Loop {
+			seq = LoopSequence
+		}
+		for _, img := range seq(len(m.images), nSteps, 1, m.seed) {
+			steps = append(steps, slices.Repeat([]int{img}, nTiles))
+		}
+	case m.Loop:
+		steps = MosaicLoopSequence(len(m.images), nTiles, m.seed)
+	default:
+		steps = MosaicSequence(len(m.images), nTiles, nSteps, m.seed)
 	}
+	period := castPeriod(m.Loop, n, m.hold, nTiles)
 	for i := range n {
-		if i%m.hold == 0 {
-			m.compose(frame, steps[(i/m.hold)%len(steps)])
+		if step := i / m.hold; i%m.hold == 0 {
+			m.compose(frame, steps[step%len(steps)], step*nTiles, period)
 		}
 		if _, err := w.Write(frame.Pix); err != nil {
 			return err
@@ -68,15 +101,25 @@ func (m *Mosaic) WriteFrames(w io.Writer, n int) error {
 	return nil
 }
 
-// compose draws each tile's image into frame, row by row.
-func (m *Mosaic) compose(frame *image.RGBA, tiles []int) {
+// compose draws each tile's image into frame, row by row. With a tint, tile
+// t is appearance first+t.
+func (m *Mosaic) compose(frame *image.RGBA, tiles []int, first, period int) {
 	rowBytes := 4 * m.tw
 	for t, idx := range tiles {
 		src := m.images[idx]
+		var tint *tintTable
+		if m.Tint.On() {
+			tint = newTintTable(m.Tint.Cast(first+t, period))
+		}
 		x0, y0 := (t%m.n)*m.tw, (t/m.n)*m.th
 		for y := range m.th {
 			d := frame.PixOffset(x0, y0+y)
-			copy(frame.Pix[d:d+rowBytes], src.Pix[y*src.Stride:y*src.Stride+rowBytes])
+			dst, row := frame.Pix[d:d+rowBytes], src.Pix[y*src.Stride:y*src.Stride+rowBytes]
+			if tint != nil {
+				tint.copy(dst, row)
+			} else {
+				copy(dst, row)
+			}
 		}
 	}
 }
