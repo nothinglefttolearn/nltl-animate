@@ -11,8 +11,9 @@ import (
 
 	"github.com/charmbracelet/huh"
 
-	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
-	"github.com/nothinglefttolearn/nltl-animate/internal/style"
+	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
+	"github.com/nothinglefttolearn/nltl-animate/internal/layout"
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 )
 
 var audioExts = map[string]bool{
@@ -23,37 +24,39 @@ var imageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true,
 }
 
-// Style names match the CLI subcommands ("single" is the root command).
+// Layout names match the CLI subcommands ("single" is the root command).
 const (
-	StyleSingle = "single"
-	StyleGrid   = "grid"
-	StyleTrain  = "train"
+	LayoutSingle = "single"
+	LayoutGrid   = "grid"
+	LayoutTrain  = "train"
 )
 
 // Choices holds what the user picked in the form.
 type Choices struct {
-	Style      string
+	Layout     string
 	AudioPath  string // empty for a silent loop
 	ImagePaths []string
-	PresetName string
+	GradeName  string
+	MotionName string
 	BPM        int
 	AutoBPM    bool
-	Still      bool
 	GridN      int
 	Tiles      string // grid with several images: "same" or "mixed"
 }
 
 // Defaults pre-fills the form (typically from command-line flags) and supplies
-// custom presets loaded from --config so they can be picked alongside built-ins.
+// custom grades and motions loaded from --config so they can be picked
+// alongside the built-ins.
 type Defaults struct {
 	NoAudio       bool
-	PresetName    string
+	GradeName     string
+	MotionName    string
 	BPM           int
 	AutoBPM       bool
-	Still         bool
 	GridN         int
 	Tiles         string
-	CustomPresets []preset.Preset
+	CustomGrades  []grade.Grade
+	CustomMotions []motion.Motion
 }
 
 func Run(d Defaults) (*Choices, error) {
@@ -69,17 +72,20 @@ func Run(d Defaults) (*Choices, error) {
 		return nil, errors.New("no image files found in current directory")
 	}
 
-	presetOpts, presetNames := presetOptions(d.CustomPresets)
+	gradeOpts, gradeNames := namedOptions(d.CustomGrades, grade.Names(), grade.Get,
+		func(g grade.Grade) (string, string) { return g.Name, g.Description })
+	motionOpts, motionNames := namedOptions(d.CustomMotions, motion.Names(), motion.Get,
+		func(m motion.Motion) (string, string) { return m.Name, m.Description })
 
 	var (
-		styleName  = StyleSingle
+		layoutName = LayoutSingle
 		audioPath  = ""
 		imagePaths []string
 		tiles      = orFirst(d.Tiles, []string{"same", "mixed"})
 		gridStr    = strconv.Itoa(max(1, d.GridN))
-		presetName = orFirst(d.PresetName, presetNames)
+		gradeName  = orFirst(d.GradeName, gradeNames)
+		motionName = orFirst(d.MotionName, motionNames)
 		bpmStr     = ""
-		still      = d.Still
 	)
 	switch {
 	case d.AutoBPM:
@@ -93,14 +99,14 @@ func Run(d Defaults) (*Choices, error) {
 	if len(audioFiles) > 0 && !d.NoAudio {
 		audioPath = audioFiles[0]
 	}
-	isNot := func(s string) func() bool { return func() bool { return styleName != s } }
+	isNot := func(s string) func() bool { return func() bool { return layoutName != s } }
 
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Style").
-				Options(styleOptions()...).
-				Value(&styleName),
+				Title("Layout").
+				Options(layoutOptions()...).
+				Value(&layoutName),
 			huh.NewSelect[string]().
 				Title("Audio file").
 				Options(audioOptions(audioFiles)...).
@@ -117,10 +123,10 @@ func Run(d Defaults) (*Choices, error) {
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Grid size").
-				Description(fmt.Sprintf("tiles per side, 1–%d", style.MaxGrid)).
+				Description(fmt.Sprintf("tiles per side, 1–%d", layout.MaxGrid)).
 				Validate(validateGridN).
 				Value(&gridStr),
-		).WithHideFunc(isNot(StyleGrid)),
+		).WithHideFunc(isNot(LayoutGrid)),
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Tiles").
@@ -129,12 +135,18 @@ func Run(d Defaults) (*Choices, error) {
 					huh.NewOption("mixed   a different image in each tile, each switching on its own", "mixed"),
 				).
 				Value(&tiles),
-		).WithHideFunc(func() bool { return styleName != StyleGrid || len(imagePaths) < 2 }),
+		).WithHideFunc(func() bool { return layoutName != LayoutGrid || len(imagePaths) < 2 }),
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Preset").
-				Options(presetOpts...).
-				Value(&presetName),
+				Title("Grade").
+				Description("how the picture looks").
+				Options(gradeOpts...).
+				Value(&gradeName),
+			huh.NewSelect[string]().
+				Title("Motion").
+				Description("how the picture moves with the beat (still: none, suggested for photographs)").
+				Options(motionOpts...).
+				Value(&motionName),
 		),
 		huh.NewGroup(
 			huh.NewInput().
@@ -148,16 +160,12 @@ func Run(d Defaults) (*Choices, error) {
 					return validateBPM(s)
 				}).
 				Value(&bpmStr),
-			huh.NewConfirm().
-				Title("Disable motion effects?").
-				Description("Suggested for photograph inputs").
-				Value(&still),
 		),
 	)
 
 	if err := form.Run(); err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
-			return nil, errors.New("cancelled")
+			return nil, errors.New("canceled")
 		}
 		return nil, err
 	}
@@ -169,24 +177,24 @@ func Run(d Defaults) (*Choices, error) {
 	gridN, _ := strconv.Atoi(gridStr)
 
 	return &Choices{
-		Style:      styleName,
+		Layout:     layoutName,
 		AudioPath:  audioPath,
 		ImagePaths: imagePaths,
-		PresetName: presetName,
+		GradeName:  gradeName,
+		MotionName: motionName,
 		BPM:        bpm,
 		AutoBPM:    autoBPM,
-		Still:      still,
 		GridN:      gridN,
 		Tiles:      tiles,
 	}, nil
 }
 
-// styleOptions lists the styles.
-func styleOptions() []huh.Option[string] {
+// layoutOptions lists the layouts.
+func layoutOptions() []huh.Option[string] {
 	return []huh.Option[string]{
-		huh.NewOption("single   the image gently moving (several: switching between them)", StyleSingle),
-		huh.NewOption("grid     the image tiled N×N", StyleGrid),
-		huh.NewOption("train    copies fly past on the left", StyleTrain),
+		huh.NewOption("single   the image filling the frame (several: switching between them)", LayoutSingle),
+		huh.NewOption("grid     the image tiled N×N", LayoutGrid),
+		huh.NewOption("train    copies fly past on the left", LayoutTrain),
 	}
 }
 
@@ -199,8 +207,8 @@ func validateImages(paths []string) error {
 
 func validateGridN(s string) error {
 	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 || n > style.MaxGrid {
-		return fmt.Errorf("enter a number from 1 to %d", style.MaxGrid)
+	if err != nil || n < 1 || n > layout.MaxGrid {
+		return fmt.Errorf("enter a number from 1 to %d", layout.MaxGrid)
 	}
 	return nil
 }
@@ -232,30 +240,33 @@ func fileOptions(files []string) []huh.Option[string] {
 	return opts
 }
 
-// presetOptions lists custom presets first, then built-ins not shadowed by a
-// custom preset of the same name. It also returns the option values in order.
-func presetOptions(custom []preset.Preset) ([]huh.Option[string], []string) {
+// namedOptions lists custom grades or motions first, then built-ins not
+// shadowed by a custom one of the same name. It also returns the option
+// values in order.
+func namedOptions[T any](custom []T, builtinNames []string, get func(string) (T, bool),
+	describe func(T) (name, description string),
+) ([]huh.Option[string], []string) {
 	var (
 		opts  []huh.Option[string]
 		names []string
 		seen  = make(map[string]bool)
 	)
-	for _, p := range custom {
-		if seen[p.Name] {
-			continue
-		}
-		seen[p.Name] = true
-		label := fmt.Sprintf("%-14s %s (config)", p.Name, p.Description)
-		opts = append(opts, huh.NewOption(label, p.Name))
-		names = append(names, p.Name)
-	}
-	for _, name := range preset.Names() {
+	for _, it := range custom {
+		name, desc := describe(it)
 		if seen[name] {
 			continue
 		}
-		p, _ := preset.Get(name)
-		label := fmt.Sprintf("%-14s %s", name, p.Description)
-		opts = append(opts, huh.NewOption(label, name))
+		seen[name] = true
+		opts = append(opts, huh.NewOption(fmt.Sprintf("%-14s %s (config)", name, desc), name))
+		names = append(names, name)
+	}
+	for _, name := range builtinNames {
+		if seen[name] {
+			continue
+		}
+		it, _ := get(name)
+		_, desc := describe(it)
+		opts = append(opts, huh.NewOption(fmt.Sprintf("%-14s %s", name, desc), name))
 		names = append(names, name)
 	}
 	return opts, names

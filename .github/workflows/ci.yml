@@ -32,8 +32,8 @@ jobs:
       - run: mise run ci
 
   integration:
-    # Renders a short clip of every style with a real ffmpeg (Ubuntu's is
-    # 6.x; the grid style needs >= 5.1).
+    # Renders a short clip of every layout with a real ffmpeg (Ubuntu's is
+    # 6.x; the grid layout needs >= 5.1).
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

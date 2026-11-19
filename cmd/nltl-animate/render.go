@@ -17,18 +17,21 @@ import (
 	"github.com/nothinglefttolearn/nltl-animate/internal/config"
 	"github.com/nothinglefttolearn/nltl-animate/internal/ffmpeg"
 	"github.com/nothinglefttolearn/nltl-animate/internal/frames"
-	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
-	"github.com/nothinglefttolearn/nltl-animate/internal/style"
+	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
+	"github.com/nothinglefttolearn/nltl-animate/internal/layout"
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 	"github.com/nothinglefttolearn/nltl-animate/internal/tempo"
 	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
-type clipStyle string
+// layoutName is how the images are arranged in the frame; each one is a
+// subcommand ("single" is the root command).
+type layoutName string
 
 const (
-	styleSingle clipStyle = "single"
-	styleGrid   clipStyle = "grid"
-	styleTrain  clipStyle = "train"
+	layoutSingle layoutName = "single"
+	layoutGrid   layoutName = "grid"
+	layoutTrain  layoutName = "train"
 )
 
 // Grid tile modes when the grid has several images.
@@ -42,22 +45,22 @@ const (
 const defaultHoldFrames = 15
 
 // oneImageLoopSeconds is how long a silent loop of a single image lasts:
-// long enough for the preset's wandering motion to read as movement.
+// long enough for the motion's breath and shake to read as movement.
 const oneImageLoopSeconds = 3
 
 // renderOptions is everything needed to render one clip. It is filled from
 // flags, and in interactive mode the TUI overrides the fields it asks about.
 type renderOptions struct {
-	Style      clipStyle
+	Layout     layoutName
 	AudioPath  string   // empty with NoAudio
 	NoAudio    bool     // silent clip that loops seamlessly (see loopFrames)
 	Overwrite  bool     // replace an existing output file without asking
 	ImagePaths []string // one or more
-	PresetName string
+	GradeName  string
+	MotionName string
 	BPM        int
 	AutoBPM    bool // detect BPM from the audio; BPM is filled in by renderClip
 	Preview    bool
-	Still      bool
 	Verbose    bool
 	OutputDir  string
 	ConfigPath string
@@ -72,17 +75,18 @@ type renderOptions struct {
 	Tiles string // tilesSame or tilesMixed
 
 	// train (Train.BPM and Train.BG are filled from BPM and TrainBG)
-	Train   style.TrainOptions
+	Train   layout.TrainOptions
 	TrainBG string
 }
 
 func defaultRenderOptions() renderOptions {
 	return renderOptions{
-		Style:      styleSingle,
-		PresetName: "industrial",
+		Layout:     layoutSingle,
+		GradeName:  grade.Default,
+		MotionName: motion.Default,
 		GridN:      3,
 		Tiles:      tilesSame,
-		Train:      style.DefaultTrainOptions(),
+		Train:      layout.DefaultTrainOptions(),
 		TrainBG:    "#000000",
 	}
 }
@@ -108,19 +112,35 @@ func loadConfig(path string) (*config.Config, error) {
 	return cfg, nil
 }
 
-// resolvePreset looks the name up in the config first, then the built-ins.
-func resolvePreset(name string, cfg *config.Config) (preset.Preset, error) {
-	if p, ok := cfg.GetPreset(name); ok {
-		return p, nil
+// resolveGrade looks the name up in the config first, then the built-ins.
+func resolveGrade(name string, cfg *config.Config) (grade.Grade, error) {
+	if g, ok := cfg.GetGrade(name); ok {
+		return g, nil
 	}
-	if p, ok := preset.Get(name); ok {
-		return p, nil
+	if g, ok := grade.Get(name); ok {
+		return g, nil
 	}
-	if len(cfg.Presets) > 0 {
-		return preset.Preset{}, fmt.Errorf("preset %q not found in config or built-ins — built-ins: %s",
-			name, strings.Join(preset.Names(), ", "))
+	return grade.Grade{}, fmt.Errorf("unknown grade %q — built-ins: %s%s",
+		name, strings.Join(grade.Names(), ", "), customHint(len(cfg.Grades)))
+}
+
+// resolveMotion looks the name up in the config first, then the built-ins.
+func resolveMotion(name string, cfg *config.Config) (motion.Motion, error) {
+	if m, ok := cfg.GetMotion(name); ok {
+		return m, nil
 	}
-	return preset.Preset{}, fmt.Errorf("unknown preset %q — try: %s", name, strings.Join(preset.Names(), ", "))
+	if m, ok := motion.Get(name); ok {
+		return m, nil
+	}
+	return motion.Motion{}, fmt.Errorf("unknown motion %q — built-ins: %s%s",
+		name, strings.Join(motion.Names(), ", "), customHint(len(cfg.Motions)))
+}
+
+func customHint(custom int) string {
+	if custom > 0 {
+		return fmt.Sprintf(" (and %d custom from --config)", custom)
+	}
+	return ""
 }
 
 // validate checks the options that do not need any files. It fills
@@ -134,7 +154,7 @@ func (o *renderOptions) validate() error {
 	}
 
 	if len(o.ImagePaths) == 0 {
-		return fmt.Errorf("%s style needs at least 1 image", o.Style)
+		return fmt.Errorf("%s layout needs at least 1 image", o.Layout)
 	}
 	if o.Hold < 0 {
 		return fmt.Errorf("--hold must be at least 1 frame, got %d", o.Hold)
@@ -149,11 +169,11 @@ func (o *renderOptions) validate() error {
 		return errors.New("use either --hold or --hold-beats, not both")
 	}
 
-	switch o.Style {
-	case styleSingle:
-	case styleGrid:
-		if o.GridN < 1 || o.GridN > style.MaxGrid {
-			return fmt.Errorf("--n must be between 1 and %d, got %d", style.MaxGrid, o.GridN)
+	switch o.Layout {
+	case layoutSingle:
+	case layoutGrid:
+		if o.GridN < 1 || o.GridN > layout.MaxGrid {
+			return fmt.Errorf("--n must be between 1 and %d, got %d", layout.MaxGrid, o.GridN)
 		}
 		switch o.Tiles {
 		case tilesSame:
@@ -164,8 +184,8 @@ func (o *renderOptions) validate() error {
 		default:
 			return fmt.Errorf("--tiles must be %q or %q, got %q", tilesSame, tilesMixed, o.Tiles)
 		}
-	case styleTrain:
-		bg, err := style.ParseColor(o.TrainBG)
+	case layoutTrain:
+		bg, err := layout.ParseColor(o.TrainBG)
 		if err != nil {
 			return fmt.Errorf("--bg: %w", err)
 		}
@@ -174,7 +194,7 @@ func (o *renderOptions) validate() error {
 			return fmt.Errorf("train: %w", err)
 		}
 	default:
-		return fmt.Errorf("unknown style %q", o.Style)
+		return fmt.Errorf("unknown layout %q", o.Layout)
 	}
 	return nil
 }
@@ -183,7 +203,7 @@ func (o *renderOptions) validate() error {
 // single and grid with several images. (Train shows several images at once
 // instead.)
 func (o *renderOptions) switches() bool {
-	return len(o.ImagePaths) > 1 && o.Style != styleTrain
+	return len(o.ImagePaths) > 1 && o.Layout != layoutTrain
 }
 
 // holdFrames is how many frames each image shows: --hold-beats, then
@@ -191,11 +211,11 @@ func (o *renderOptions) switches() bool {
 func (o *renderOptions) holdFrames() int {
 	switch {
 	case o.HoldBeats > 0:
-		return style.HoldFromBeats(o.HoldBeats, o.BPM)
+		return layout.HoldFromBeats(o.HoldBeats, o.BPM)
 	case o.Hold > 0:
 		return o.Hold
 	case o.BPM > 0:
-		return style.HoldFromBeats(1, o.BPM)
+		return layout.HoldFromBeats(1, o.BPM)
 	default:
 		return defaultHoldFrames
 	}
@@ -211,7 +231,7 @@ const timestampLayout = "20060102-150405"
 // now is the clock for output file names; tests replace it.
 var now = time.Now
 
-// outputPath is nltl_animate_{style}[_detail]_{audio|loop_noaudio}[_preview]_{timestamp}.mp4
+// outputPath is nltl_animate_{layout}[_detail]_{audio|loop_noaudio}[_preview]_{timestamp}.mp4
 // next to the audio file, or the first image with --no-audio (or in
 // --output-dir).
 func (o *renderOptions) outputPath(at time.Time) string {
@@ -225,19 +245,19 @@ func (o *renderOptions) outputPath(at time.Time) string {
 	}
 
 	var suffix string
-	switch o.Style {
-	case styleSingle:
+	switch o.Layout {
+	case layoutSingle:
 		suffix = "single"
 		if o.switches() {
 			suffix = "cycle"
 		}
-	case styleGrid:
+	case layoutGrid:
 		suffix = "grid" + strconv.Itoa(o.GridN)
 		if o.switches() && o.Tiles == tilesMixed {
 			suffix += "_mixed"
 		}
 	default:
-		suffix = string(o.Style)
+		suffix = string(o.Layout)
 	}
 	if o.NoAudio {
 		suffix += "_loop_noaudio"
@@ -287,14 +307,15 @@ func (o *renderOptions) confirmOverwrite(path string) error {
 // loopFrames is the length of a silent clip, chosen so it loops seamlessly:
 // one pass through the image sequence (each image once, or for train one
 // image cycle of the cars), or oneImageLoopSeconds with a single image. The
-// preset's wobble is not matched up at the loop point; it is jumpy anyway.
+// motion's breath and shake are not matched up at the loop point; they are
+// jumpy anyway.
 func (o *renderOptions) loopFrames() int {
 	oneImage := oneImageLoopSeconds * video.FPS
 	switch {
-	case o.Style == styleTrain && len(o.ImagePaths) > 1:
-		return style.TrainLoopFrames(o.Train, len(o.ImagePaths), 0)
-	case o.Style == styleTrain:
-		return style.TrainLoopFrames(o.Train, 1, oneImage)
+	case o.Layout == layoutTrain && len(o.ImagePaths) > 1:
+		return layout.TrainLoopFrames(o.Train, len(o.ImagePaths), 0)
+	case o.Layout == layoutTrain:
+		return layout.TrainLoopFrames(o.Train, 1, oneImage)
 	case o.switches():
 		return len(o.ImagePaths) * o.holdFrames()
 	default:
@@ -303,52 +324,52 @@ func (o *renderOptions) loopFrames() int {
 }
 
 // videoInput returns the ffmpeg video input (still image or frame source)
-// and filtergraph for the style.
-func (o *renderOptions) videoInput(p preset.Preset) (ffmpeg.Options, error) {
+// and filtergraph for the layout, with the motion and grade over it.
+func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Options, error) {
 	w, h := video.Size, video.Size
 	switch {
-	case o.Style == styleGrid && !o.switches():
-		return ffmpeg.Options{ImagePath: o.ImagePaths[0], Filter: style.GridFilter(p, w, h, o.GridN, o.BPM)}, nil
+	case o.Layout == layoutGrid && !o.switches():
+		return ffmpeg.Options{ImagePath: o.ImagePaths[0], Filter: layout.GridFilter(m, g, w, h, o.GridN, o.BPM)}, nil
 
-	case o.Style == styleGrid && o.Tiles == tilesMixed:
-		tw, th := style.GridTileSize(w, h, o.GridN)
+	case o.Layout == layoutGrid && o.Tiles == tilesMixed:
+		tw, th := layout.GridTileSize(w, h, o.GridN)
 		imgs, err := loadCovered(o.ImagePaths, tw, th)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		src, err := style.NewMosaic(imgs, o.GridN, o.holdFrames(), o.Seed)
+		src, err := layout.NewMosaic(imgs, o.GridN, o.holdFrames(), o.Seed)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
 		src.Loop = o.NoAudio
-		return ffmpeg.Options{Frames: src, Filter: style.MosaicFilter(p, w, h, o.GridN, o.BPM)}, nil
+		return ffmpeg.Options{Frames: src, Filter: layout.MosaicFilter(m, g, w, h, o.GridN, o.BPM)}, nil
 
-	case o.Style == styleGrid: // same image in every tile, switching together
-		tw, th := style.GridTileSize(w, h, o.GridN)
+	case o.Layout == layoutGrid: // same image in every tile, switching together
+		tw, th := layout.GridTileSize(w, h, o.GridN)
 		imgs, err := loadCovered(o.ImagePaths, tw, th)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		src, err := style.NewCycle(imgs, o.holdFrames(), o.Seed)
+		src, err := layout.NewCycle(imgs, o.holdFrames(), o.Seed)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
 		src.Loop = o.NoAudio
-		return ffmpeg.Options{Frames: src, Filter: style.GridFilter(p, w, h, o.GridN, o.BPM)}, nil
+		return ffmpeg.Options{Frames: src, Filter: layout.GridFilter(m, g, w, h, o.GridN, o.BPM)}, nil
 
-	case o.Style == styleSingle && o.switches():
+	case o.Layout == layoutSingle && o.switches():
 		imgs, err := loadCovered(o.ImagePaths, w, h)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		src, err := style.NewCycle(imgs, o.holdFrames(), o.Seed)
+		src, err := layout.NewCycle(imgs, o.holdFrames(), o.Seed)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
 		src.Loop = o.NoAudio
-		return ffmpeg.Options{Frames: src, Filter: p.BuildFilter(w, h, o.BPM)}, nil
+		return ffmpeg.Options{Frames: src, Filter: layout.Filter(m, g, w, h, o.BPM)}, nil
 
-	case o.Style == styleTrain:
+	case o.Layout == layoutTrain:
 		// Convert each image as it is decoded so only one decoder-format
 		// copy is alive at a time.
 		imgs := make([]image.Image, 0, len(o.ImagePaths))
@@ -363,14 +384,14 @@ func (o *renderOptions) videoInput(p preset.Preset) (ffmpeg.Options, error) {
 		if o.NoAudio {
 			train.LoopFrames = o.loopFrames()
 		}
-		src, err := style.NewTrain(imgs, w, h, train)
+		src, err := layout.NewTrain(imgs, w, h, train)
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		return ffmpeg.Options{Frames: src, Filter: p.BuildFilter(w, h, o.BPM)}, nil
+		return ffmpeg.Options{Frames: src, Filter: layout.Filter(m, g, w, h, o.BPM)}, nil
 
 	default:
-		return ffmpeg.Options{ImagePath: o.ImagePaths[0], Filter: p.BuildFilter(w, h, o.BPM)}, nil
+		return ffmpeg.Options{ImagePath: o.ImagePaths[0], Filter: layout.Filter(m, g, w, h, o.BPM)}, nil
 	}
 }
 
@@ -388,14 +409,14 @@ func loadCovered(paths []string, w, h int) ([]*image.RGBA, error) {
 	return imgs, nil
 }
 
-// styleSummary describes the style settings for the pre-render summary.
-func (o *renderOptions) styleSummary() string {
-	switch o.Style {
-	case styleSingle:
+// layoutSummary describes the layout settings for the pre-render summary.
+func (o *renderOptions) layoutSummary() string {
+	switch o.Layout {
+	case layoutSingle:
 		if o.switches() {
 			return fmt.Sprintf("single — %d images, new image %s (seed %d)", len(o.ImagePaths), o.holdSummary(), o.Seed)
 		}
-	case styleGrid:
+	case layoutGrid:
 		grid := fmt.Sprintf("grid — %d×%d", o.GridN, o.GridN)
 		switch {
 		case !o.switches():
@@ -407,7 +428,7 @@ func (o *renderOptions) styleSummary() string {
 			return fmt.Sprintf("%s, %d images, same in every tile, new image %s (seed %d)",
 				grid, len(o.ImagePaths), o.holdSummary(), o.Seed)
 		}
-	case styleTrain:
+	case layoutTrain:
 		rate := fmtFloat(o.Train.Speed) + " per second"
 		switch {
 		case o.BPM > 0 && o.Train.Beats == 1:
@@ -437,21 +458,19 @@ func (o *renderOptions) holdSummary() string {
 	}
 }
 
-// headlessCommand returns the flag-driven invocation equivalent to o. Style
-// flags are included only when they differ from the defaults; the cycle seed
-// is always included so the clip can be reproduced.
+// headlessCommand returns the flag-driven invocation equivalent to o. Layout
+// flags are included only when they differ from the defaults; the grade,
+// motion and switching seed are always included so the clip can be
+// reproduced.
 func (o *renderOptions) headlessCommand() string {
 	d := defaultRenderOptions()
 	parts := []string{"nltl-animate"}
-	if o.Style != styleSingle {
-		parts = append(parts, string(o.Style))
+	if o.Layout != layoutSingle {
+		parts = append(parts, string(o.Layout))
 	}
-	parts = append(parts, "--preset", o.PresetName)
+	parts = append(parts, "--grade", o.GradeName, "--motion", o.MotionName)
 	if o.BPM > 0 {
 		parts = append(parts, "--bpm", strconv.Itoa(o.BPM))
-	}
-	if o.Still {
-		parts = append(parts, "--still")
 	}
 	if o.Preview {
 		parts = append(parts, "--preview")
@@ -476,11 +495,11 @@ func (o *renderOptions) headlessCommand() string {
 		flagIf(o.HoldBeats != d.HoldBeats, "--hold-beats", fmtFloat(o.HoldBeats))
 		flagIf(o.Seed != 0, "--seed", strconv.FormatUint(o.Seed, 10))
 	}
-	switch o.Style {
-	case styleGrid:
+	switch o.Layout {
+	case layoutGrid:
 		flagIf(true, "--n", strconv.Itoa(o.GridN))
 		flagIf(o.switches() && o.Tiles != d.Tiles, "--tiles", o.Tiles)
-	case styleTrain:
+	case layoutTrain:
 		t, dt := o.Train, d.Train
 		flagIf(t.Copies != dt.Copies, "--copies", strconv.Itoa(t.Copies))
 		flagIf(t.Spacing != dt.Spacing, "--spacing", fmtFloat(t.Spacing))
@@ -536,14 +555,13 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 		o.Seed = rand.Uint64() | 1 //nolint:gosec // visual randomness; |1 keeps it non-zero
 	}
 
-	p, err := resolvePreset(o.PresetName, cfg)
+	g, err := resolveGrade(o.GradeName, cfg)
 	if err != nil {
 		return err
 	}
-	if o.Still {
-		p.ZoomAmp = 0
-		p.JitterAmp = 0
-		p.ZoomBase = 1.0
+	m, err := resolveMotion(o.MotionName, cfg)
+	if err != nil {
+		return err
 	}
 
 	var duration float64
@@ -554,7 +572,7 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 		}
 	}
 
-	ff, err := o.videoInput(p)
+	ff, err := o.videoInput(m, g)
 	if err != nil {
 		return err
 	}
@@ -568,10 +586,11 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	ff.Verbose = o.Verbose
 
 	fmt.Println()
-	if s := o.styleSummary(); s != "" {
-		fmt.Println(label("Style") + valueStyle.Render(s))
+	if s := o.layoutSummary(); s != "" {
+		fmt.Println(label("Layout") + valueStyle.Render(s))
 	}
-	fmt.Println(label("Preset") + valueStyle.Render(fmt.Sprintf("%s — %s", p.Name, p.Description)))
+	fmt.Println(label("Grade") + valueStyle.Render(g.Name) + labelStyle.Render(" — "+g.Summary()))
+	fmt.Println(label("Motion") + valueStyle.Render(m.Name) + labelStyle.Render(" — "+m.Summary()))
 	if o.BPM > 0 {
 		bpm := strconv.Itoa(o.BPM)
 		if o.AutoBPM {
@@ -585,9 +604,6 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	}
 	if o.Preview {
 		fmt.Println(label("Preview") + valueStyle.Render(fmt.Sprintf("%ds low-quality render", video.PreviewSeconds)))
-	}
-	if o.Still {
-		fmt.Println(label("Still") + valueStyle.Render("yes (spatial motion disabled)"))
 	}
 	fmt.Println(label("Output") + accentStyle.Render(ff.OutputPath))
 	fmt.Println()

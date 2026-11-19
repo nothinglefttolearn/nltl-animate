@@ -1,4 +1,4 @@
-package style
+package layout
 
 import (
 	"image"
@@ -6,7 +6,7 @@ import (
 	"math"
 )
 
-// ring returns an n x n opaque colour ring with transparent centre and
+// ring returns an n x n opaque color ring with transparent center and
 // corners, standing in for a logo with an alpha channel.
 func ring(n int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, n, n))

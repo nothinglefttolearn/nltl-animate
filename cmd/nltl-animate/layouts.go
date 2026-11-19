@@ -3,26 +3,30 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/nothinglefttolearn/nltl-animate/internal/style"
+	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
+	"github.com/nothinglefttolearn/nltl-animate/internal/layout"
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 )
 
 // addRenderFlags registers the flags every rendering command shares.
 func addRenderFlags(cmd *cobra.Command, o *renderOptions) {
 	f := cmd.Flags()
-	f.StringVar(&o.PresetName, "preset", o.PresetName,
-		"visual preset (industrial, clean, dark, or custom from --config)")
-	f.Var(bpmFlag{o}, "bpm", `track BPM for beat-synced animations, or "auto" to detect it (0 = time-based defaults)`)
+	f.StringVar(&o.GradeName, "grade", o.GradeName,
+		"how the picture looks: "+strings.Join(grade.Names(), ", ")+", or custom from --config")
+	f.StringVar(&o.MotionName, "motion", o.MotionName,
+		"how the picture moves with the beat: "+strings.Join(motion.Names(), ", ")+", or custom from --config")
+	f.Var(bpmFlag{o}, "bpm", `track BPM for the motion and image switching, or "auto" to detect it (0 = assume 120)`)
 	f.BoolVar(&o.Preview, "preview", o.Preview, "render a short low-quality preview")
 	f.BoolVar(&o.NoAudio, "no-audio", o.NoAudio,
 		"no audio file: every argument is an image, and the silent clip loops seamlessly")
-	f.BoolVar(&o.Still, "still", o.Still, "disable spatial motion (zoom, jitter) — keeps brightness pulsing")
 	f.BoolVarP(&o.Verbose, "verbose", "v", o.Verbose, "show raw ffmpeg output during render")
 	f.StringVarP(&o.OutputDir, "output-dir", "o", o.OutputDir, "output directory (default: same as audio file, or first image with --no-audio)")
 	f.BoolVar(&o.Overwrite, "overwrite", o.Overwrite, "replace an existing output file without asking")
-	f.StringVarP(&o.ConfigPath, "config", "c", o.ConfigPath, "YAML config file with custom presets")
+	f.StringVarP(&o.ConfigPath, "config", "c", o.ConfigPath, "YAML config file with custom grades and motions")
 }
 
 // bpmFlag is --bpm: a whole number, or "auto" to detect it from the audio.
@@ -71,9 +75,9 @@ func (o *renderOptions) minArgs() int {
 	return 2
 }
 
-// styleCmd builds a subcommand that renders one style. The shared flags are
-// registered on it; extra registers the style's own flags.
-func styleCmd(s clipStyle, use, short, long string, extra func(*cobra.Command, *renderOptions)) *cobra.Command {
+// layoutCmd builds a subcommand that renders one layout. The shared flags are
+// registered on it; extra registers the layout's own flags.
+func layoutCmd(l layoutName, use, short, long string, extra func(*cobra.Command, *renderOptions)) *cobra.Command {
 	opts := defaultRenderOptions()
 	cmd := &cobra.Command{
 		Use:   use,
@@ -87,7 +91,7 @@ func styleCmd(s clipStyle, use, short, long string, extra func(*cobra.Command, *
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			opts.Style = s
+			opts.Layout = l
 			opts.setArgs(args)
 			return run(opts)
 		},
@@ -99,7 +103,7 @@ func styleCmd(s clipStyle, use, short, long string, extra func(*cobra.Command, *
 	return cmd
 }
 
-// addSwitchFlags registers the flags for styles that switch between several
+// addSwitchFlags registers the flags for layouts that switch between several
 // images over time (single and grid).
 func addSwitchFlags(cmd *cobra.Command, o *renderOptions) {
 	f := cmd.Flags()
@@ -109,12 +113,12 @@ func addSwitchFlags(cmd *cobra.Command, o *renderOptions) {
 }
 
 func gridCmd() *cobra.Command {
-	return styleCmd(styleGrid,
+	return layoutCmd(layoutGrid,
 		"grid <audio> <image> [image...]",
 		"Tile the image(s) N×N, every tile moving in sync",
-		`Tiles the image into an N×N grid. The preset's wobble is applied to each
-tile identically; its grade (vignette, grain, brightness pulse) is applied once
-over the whole frame. Requires ffmpeg 5.1 or newer.
+		`Tiles the image into an N×N grid. The motion's breath and shake are applied
+to each tile identically; its pulse and the grade (vignette, grain, ...) are
+applied once over the whole frame. Requires ffmpeg 5.1 or newer.
 
 With several images, the tiles switch between them at random (never the same
 image twice in a row), every beat with --bpm or as set by --hold/--hold-beats:
@@ -137,14 +141,14 @@ with a single image.`,
 }
 
 func trainCmd() *cobra.Command {
-	d := style.DefaultTrainOptions()
-	return styleCmd(styleTrain,
+	d := layout.DefaultTrainOptions()
+	return layoutCmd(layoutTrain,
 		"train <audio> <image> [image...]",
 		"Copies of the image(s) fly past on the left, like watching a train go by",
 		`Fakes a 3D scene: copies of the image travel along a track beside the
 viewer, coming out of the distance and passing on the left. Transparent areas
 of the image (e.g. a PNG logo) show the copies behind. Distant copies fade
-into the background colour.
+into the background color.
 
 Give several images and the cars cycle through them in order, so a different
 image passes at every step. Images keep their own shapes; their inner edges
@@ -152,7 +156,7 @@ line up along the track.
 
 With --bpm, one copy passes every --beats beats; otherwise --speed copies
 pass per second. --vanish moves the vanishing point to the right to fill more
-of the frame. The preset's wobble and grade are applied over the result.
+of the frame. The motion and grade are applied over the result.
 
 With --no-audio, the silent clip loops seamlessly: it lasts while one copy of
 each image passes (at least 3 seconds with a single image), with the speed
@@ -167,7 +171,7 @@ nudged slightly so the loop is a whole number of frames.`,
 			f.Float64Var(&o.Train.FOV, "fov", d.FOV, "horizontal field of view in degrees")
 			f.Float64Var(&o.Train.Vanish, "vanish", d.Vanish, "vanishing point position across the frame (0.1–1)")
 			f.Float64Var(&o.Train.Fog, "fog", d.Fog, "how much distant copies fade into the background (0–1)")
-			f.StringVar(&o.TrainBG, "bg", o.TrainBG, "background colour (#rgb or #rrggbb)")
+			f.StringVar(&o.TrainBG, "bg", o.TrainBG, "background color (#rgb or #rrggbb)")
 		},
 	)
 }

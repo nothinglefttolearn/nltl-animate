@@ -41,7 +41,7 @@ type Options struct {
 	OutputPath string
 	// Filter is a filtergraph applied to the video input. It may contain
 	// several ';'-separated chains (e.g. split/xstack) but must have exactly
-	// one unlabelled input and output; Render adds the [0:v] and [v] labels.
+	// one unlabeled input and output; Render adds the [0:v] and [v] labels.
 	Filter   string
 	Duration float64
 	// NumFrames, when > 0, sets the clip length in frames exactly, in place

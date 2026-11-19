@@ -1,4 +1,4 @@
-package style
+package layout
 
 import (
 	"bytes"
@@ -92,7 +92,7 @@ func TestTrainExitsLeftBeforeWrapping(t *testing.T) {
 					vanish, tr.aspect, left+width)
 			}
 			// And the farthest copy is right of the vanishing point's left side
-			// only by its own width: the track recedes towards cx.
+			// only by its own width: the track recedes toward cx.
 			l2, _, w2, _ := tr.screenRect(tr.near+tr.length, tr.aspect)
 			if l2+w2 > tr.cx || l2+w2 < tr.cx-w2*2 {
 				t.Errorf("far copy at %.1f..%.1f should end just left of cx=%.1f", l2, l2+w2, tr.cx)
@@ -203,7 +203,7 @@ func TestTrainRenderFrame(t *testing.T) {
 	}
 	// Left of it, at eye level, a copy is drawn.
 	if c := dst.RGBAAt(20, 18); c.R < 200 {
-		t.Errorf("expected a red copy left of centre, got %v", c)
+		t.Errorf("expected a red copy left of center, got %v", c)
 	}
 	for _, c := range []color.RGBA{dst.RGBAAt(0, 0), dst.RGBAAt(63, 35)} {
 		if c.A != 255 {
@@ -257,7 +257,7 @@ func TestMipChainAndSelection(t *testing.T) {
 		t.Errorf("mip heights = %v", heights)
 	}
 	if c := tr.imgs[0].mips[3].RGBAAt(1, 1); c.G != 255 {
-		t.Errorf("mip colour drifted: %v", c)
+		t.Errorf("mip color drifted: %v", c)
 	}
 	for target, want := range map[float64]int{1000: 256, 200: 256, 128: 128, 100: 128, 20: 32, 3: 16} {
 		if got := tr.imgs[0].mipFor(target).Bounds().Dy(); got != want {

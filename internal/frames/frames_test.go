@@ -51,7 +51,7 @@ func TestCoverCropsTallerSource(t *testing.T) {
 	}
 }
 
-func TestToRGBANormalisesBounds(t *testing.T) {
+func TestToRGBANormalizesBounds(t *testing.T) {
 	sub := halves(10, 10).SubImage(image.Rect(5, 5, 10, 10))
 	got := ToRGBA(sub)
 	if got.Bounds() != image.Rect(0, 0, 5, 5) {

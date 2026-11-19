@@ -4,38 +4,53 @@ import (
 	"testing"
 
 	"github.com/nothinglefttolearn/nltl-animate/internal/config"
-	"github.com/nothinglefttolearn/nltl-animate/internal/preset"
+	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 )
 
-func TestResolvePreset(t *testing.T) {
-	cfg := &config.Config{Presets: []preset.Preset{
-		{Name: "mine", GrainStrength: 1},
-		{Name: "dark", GrainStrength: 99}, // shadows the built-in
-	}}
+func TestResolveGradeAndMotion(t *testing.T) {
+	cfg := &config.Config{
+		Grades: []grade.Grade{
+			{Name: "mine", Grain: 1},
+			{Name: "dark", Grain: 99}, // replaces the built-in
+		},
+		Motions: []motion.Motion{{Name: "mine", Breath: 7}},
+	}
 
 	tests := []struct {
 		name      string
 		cfg       *config.Config
-		preset    string
-		wantGrain int
+		grade     string
+		wantGrain float64
 		wantErr   bool
 	}{
 		{"custom", cfg, "mine", 1, false},
-		{"custom shadows built-in", cfg, "dark", 99, false},
-		{"falls back to built-in", cfg, "industrial", 25, false},
+		{"custom replaces built-in", cfg, "dark", 99, false},
+		{"falls back to built-in", cfg, "muted", 25, false},
 		{"empty config uses built-in", &config.Config{}, "dark", 40, false},
 		{"unknown", cfg, "nope", 0, true},
+		{"old preset name", &config.Config{}, "industrial", 0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p, err := resolvePreset(tt.preset, tt.cfg)
+			g, err := resolveGrade(tt.grade, tt.cfg)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !tt.wantErr && p.GrainStrength != tt.wantGrain {
-				t.Errorf("GrainStrength = %d, want %d", p.GrainStrength, tt.wantGrain)
+			if !tt.wantErr && g.Grain != tt.wantGrain {
+				t.Errorf("Grain = %g, want %g", g.Grain, tt.wantGrain)
 			}
 		})
+	}
+
+	if m, err := resolveMotion("mine", cfg); err != nil || m.Breath != 7 {
+		t.Errorf("custom motion = %+v, %v", m, err)
+	}
+	if m, err := resolveMotion("still", cfg); err != nil || m.Breath != 0 {
+		t.Errorf("built-in still = %+v, %v", m, err)
+	}
+	if _, err := resolveMotion("muted", cfg); err == nil {
+		t.Error("a grade name is not a motion")
 	}
 }
 
@@ -49,35 +64,35 @@ func TestLoadConfigEmptyPath(t *testing.T) {
 func TestHeadlessCommand(t *testing.T) {
 	base := defaultRenderOptions()
 	base.AudioPath, base.ImagePaths = "a.wav", []string{"i.jpg"}
-	base.PresetName = "dark"
+	base.GradeName, base.MotionName = "dark", "gentle"
 
 	full := base
-	full.BPM, full.Still, full.Preview = 138, true, true
+	full.BPM, full.Preview = 138, true
 	full.ConfigPath, full.OutputDir = "nltl.yaml", "out"
 
 	several := base
 	several.ImagePaths, several.Seed, several.Hold = []string{"a.png", "b.png"}, 42, 3
 
 	gridMixed := base
-	gridMixed.Style, gridMixed.ImagePaths, gridMixed.Seed, gridMixed.Tiles = styleGrid, []string{"a.png", "b.png"}, 9, tilesMixed
+	gridMixed.Layout, gridMixed.ImagePaths, gridMixed.Seed, gridMixed.Tiles = layoutGrid, []string{"a.png", "b.png"}, 9, tilesMixed
 
 	grid := base
-	grid.Style, grid.GridN = styleGrid, 4
+	grid.Layout, grid.GridN = layoutGrid, 4
 
 	train := base
-	train.Style, train.Train.Copies, train.Train.Vanish, train.TrainBG = styleTrain, 30, 0.7, "#112233"
+	train.Layout, train.Train.Copies, train.Train.Vanish, train.TrainBG = layoutTrain, 30, 0.7, "#112233"
 
 	tests := []struct {
 		name string
 		opts renderOptions
 		want string
 	}{
-		{"minimal", base, "nltl-animate --preset dark a.wav i.jpg"},
-		{"all flags", full, "nltl-animate --preset dark --bpm 138 --still --preview --config nltl.yaml --output-dir out a.wav i.jpg"},
-		{"several images", several, "nltl-animate --preset dark --hold 3 --seed 42 a.wav a.png b.png"},
-		{"grid mixed", gridMixed, "nltl-animate grid --preset dark --seed 9 --n 3 --tiles mixed a.wav a.png b.png"},
-		{"grid", grid, "nltl-animate grid --preset dark --n 4 a.wav i.jpg"},
-		{"train only changed flags", train, "nltl-animate train --preset dark --copies 30 --vanish 0.7 --bg #112233 a.wav i.jpg"},
+		{"minimal", base, "nltl-animate --grade dark --motion gentle a.wav i.jpg"},
+		{"all flags", full, "nltl-animate --grade dark --motion gentle --bpm 138 --preview --config nltl.yaml --output-dir out a.wav i.jpg"},
+		{"several images", several, "nltl-animate --grade dark --motion gentle --hold 3 --seed 42 a.wav a.png b.png"},
+		{"grid mixed", gridMixed, "nltl-animate grid --grade dark --motion gentle --seed 9 --n 3 --tiles mixed a.wav a.png b.png"},
+		{"grid", grid, "nltl-animate grid --grade dark --motion gentle --n 4 a.wav i.jpg"},
+		{"train only changed flags", train, "nltl-animate train --grade dark --motion gentle --copies 30 --vanish 0.7 --bg #112233 a.wav i.jpg"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
