@@ -8,15 +8,20 @@ import (
 	"math"
 	"math/rand/v2"
 
+	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
 // Cycle shows a random one of its images on every frame (or every Hold
-// frames), never the same image twice in a row. It implements
-// ffmpeg.FrameSource.
+// frames), never the same image twice in a row. With a tint, every switch is
+// a new appearance with its own cast, so even a single image changes color
+// on every switch. It implements ffmpeg.FrameSource.
 type Cycle struct {
-	// Loop makes the sequence repeat: see LoopSequence.
+	// Loop makes the sequence repeat: see LoopSequence. The casts then
+	// repeat with the clip.
 	Loop bool
+	// Tint gives each switch its own cast.
+	Tint motion.Tinter
 
 	w, h   int
 	images []*image.RGBA
@@ -28,17 +33,15 @@ type Cycle struct {
 // frames.Cover), so callers can decode and shrink large source images one at
 // a time. Memory is about w*h*4 bytes per image.
 func NewCycle(imgs []*image.RGBA, hold int, seed uint64) (*Cycle, error) {
-	if len(imgs) < 2 {
-		return nil, errors.New("cycle needs at least 2 images")
+	if len(imgs) < 1 {
+		return nil, errors.New("cycle needs at least 1 image")
 	}
 	if hold < 1 {
 		return nil, errors.New("hold must be at least 1 frame")
 	}
-	b := imgs[0].Bounds()
-	for i, img := range imgs {
-		if img.Bounds() != b || img.Stride != 4*b.Dx() {
-			return nil, fmt.Errorf("cycle image %d is %v, want tightly packed %v", i, img.Bounds(), b)
-		}
+	b, err := sameSize("cycle", imgs)
+	if err != nil {
+		return nil, err
 	}
 	return &Cycle{w: b.Dx(), h: b.Dy(), images: imgs, hold: hold, seed: seed}, nil
 }
@@ -50,12 +53,36 @@ func (c *Cycle) WriteFrames(w io.Writer, n int) error {
 	if c.Loop {
 		seq = LoopSequence
 	}
-	for _, idx := range seq(len(c.images), n, c.hold, c.seed) {
-		if _, err := w.Write(c.images[idx].Pix); err != nil {
+	var tinted []byte
+	if c.Tint.On() {
+		tinted = make([]byte, c.w*c.h*4)
+	}
+	period := castPeriod(c.Loop, n, c.hold, 1)
+	for i, idx := range seq(len(c.images), n, c.hold, c.seed) {
+		frame := c.images[idx].Pix
+		if tinted != nil {
+			if i%c.hold == 0 {
+				newTintTable(c.Tint.Cast(i/c.hold, period)).copy(tinted, frame)
+			}
+			frame = tinted
+		}
+		if _, err := w.Write(frame); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// sameSize checks that imgs are all the size of the first and tightly
+// packed, and returns that size.
+func sameSize(what string, imgs []*image.RGBA) (image.Rectangle, error) {
+	b := imgs[0].Bounds()
+	for i, img := range imgs {
+		if img.Bounds() != b || img.Stride != 4*b.Dx() {
+			return b, fmt.Errorf("%s image %d is %v, want tightly packed %v", what, i, img.Bounds(), b)
+		}
+	}
+	return b, nil
 }
 
 // Sequence returns the image index for each of nFrames frames. Each pick is
@@ -64,6 +91,9 @@ func (c *Cycle) WriteFrames(w io.Writer, n int) error {
 func Sequence(nImages, nFrames, hold int, seed uint64) []int {
 	r := rand.New(rand.NewPCG(seed, 0x6e6c746c)) //nolint:gosec // visual randomness, not security
 	seq := make([]int, nFrames)
+	if nImages < 2 {
+		return seq // only image 0
+	}
 	prev := -1
 	for i := range seq {
 		if i%hold == 0 {

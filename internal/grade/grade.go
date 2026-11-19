@@ -91,11 +91,12 @@ func (g Grade) Validate() error {
 
 // Filter applies the grade at whatever size its input is. brightness is an
 // ffmpeg expression for the eq filter's brightness (the motion's pulse, or
-// "0"); it shares the eq filter so the pulse costs no extra pass.
+// "0"); it shares the eq filter so the pulse costs no extra pass. eq
+// evaluates its expressions only once unless told to per frame.
 func (g Grade) Filter(brightness string) string {
 	return fmt.Sprintf(
 		"gblur=sigma=%.1f:steps=1,"+
-			"eq=brightness='%s':contrast=%.2f:saturation=%.2f,"+
+			"eq=brightness='%s':contrast=%.2f:saturation=%.2f:eval=frame,"+
 			"vignette=angle=%.6f,"+
 			"noise=alls=%d:allf=t+u",
 		g.Softness/10, // 100 → sigma 10, heavily smeared at 1080

@@ -22,7 +22,7 @@ The layout in which copies of the images travel along a perspective track and pa
 ### Treatment
 
 **Motion**:
-A named setting for everything applied over a layout that changes in time with the beat: breath, shake and pulse. Chosen independently of the grade; built-in or custom.
+A named setting for everything that changes in time with the beat, over the whole frame or per image: breath, shake, pulse and tint. Chosen independently of the grade; built-in or custom.
 _Avoid_: Preset, wobble, animation
 
 **Breath**:
@@ -37,8 +37,12 @@ _Avoid_: Jitter, wobble
 The part of a motion where the whole frame swells brighter and darker, once every so many beats. Its strength is the brightness change, as a percentage.
 _Avoid_: Brightness amplitude, flash
 
+**Tint**:
+The part of a motion where each appearance of an image (a new image in a tile, a new car on the train) gets its own random color cast, without changing brightness. Its strength is how far red, green and blue can each move from the original, as a percentage.
+_Avoid_: Flicker, color variation, color randomization, color shift
+
 **Still**:
-The built-in motion with no breath, shake or pulse.
+The built-in motion with no breath, shake, pulse or tint.
 
 **Custom**:
 A grade or motion defined by the user in a config file rather than built in. Otherwise the same kind of thing as a built-in one.

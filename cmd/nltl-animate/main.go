@@ -59,7 +59,9 @@ track and one or more images, moving and switching them in time with the beat.
 
 With an audio file and an image, renders the image gently moving. With
 several images, switches between them at random (never the same image twice
-in a row), every beat with --bpm or as set by --hold/--hold-beats; every run
+in a row), every beat with --bpm or as set by --hold/--hold-beats. With a
+motion that has a tint (e.g. --motion shifting), every image shown gets its
+own color, so even a single image changes color on every switch. Every run
 prints its --seed so a clip can be reproduced exactly.
 
 With --no-audio, every argument is an image and the clip is silent and loops
@@ -70,7 +72,8 @@ Every clip has a layout, a grade and a motion, chosen separately:
   layout   how the images are arranged: single (this command), or the
            grid and train subcommands
   --grade  how the picture looks (color, softness, vignette, grain)
-  --motion how the picture moves with the beat (breath, shake, pulse)
+  --motion how the picture moves with the beat (breath, shake, pulse, and
+           tint: a different color for every image shown)
 Run "nltl-animate grades" and "nltl-animate motions" to see what each does.
 
 Every layout takes one or more images. With no arguments, an interactive
@@ -188,7 +191,9 @@ func motionsCmd() *cobra.Command {
 frame, rates are in beats (at 120 BPM without --bpm):
   breath  how far the frame zooms in and out, once every breath_beats
   shake   how far the frame drifts and jitters
-  pulse   how much the brightness swells, once every pulse_beats`,
+  pulse   how much the brightness swells, once every pulse_beats
+  tint    how far each image shown (each switch, grid tile or train car)
+          leans toward its own color, without getting brighter or darker`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true

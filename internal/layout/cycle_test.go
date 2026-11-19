@@ -101,8 +101,8 @@ func TestCycleWriteFrames(t *testing.T) {
 
 func TestNewCycleErrors(t *testing.T) {
 	a := solid(2, 2, color.RGBA{A: 255})
-	if _, err := NewCycle([]*image.RGBA{a}, 1, 0); err == nil {
-		t.Error("expected error for a single image")
+	if _, err := NewCycle(nil, 1, 0); err == nil {
+		t.Error("expected error for no images")
 	}
 	if _, err := NewCycle([]*image.RGBA{a, a}, 0, 0); err == nil {
 		t.Error("expected error for hold 0")
