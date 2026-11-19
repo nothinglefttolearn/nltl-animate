@@ -29,7 +29,23 @@ jobs:
             ~/.cache/golangci-lint
           key: go-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.toml') }}
           restore-keys: go-${{ runner.os }}-
-      - run: mise run ci
+      # The same tasks as `mise run ci`, one step each so every check gets its
+      # own line and log in the Actions view. Keep this list in sync with the
+      # `ci` task's depends in mise.toml.
+      - name: Check formatting
+        run: mise run fmt:check
+      - name: Check go.mod is tidy
+        run: mise run tidy:check
+      - name: Verify modules
+        run: mise run mod:verify
+      - name: Lint
+        run: mise run lint
+      - name: Test
+        run: mise run test
+      - name: Scan for vulnerabilities
+        run: mise run vuln
+      - name: Build
+        run: mise run build
 
   integration:
     # Renders a short clip of every layout with a real ffmpeg (Ubuntu's is
@@ -38,12 +54,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - uses: jdx/mise-action@v3
         with:
           install_args: go
           cache: true
-      - run: mise run test:integration
+      - name: Render every layout with ffmpeg
+        run: mise run test:integration
 
   build:
     # Cross-compile check: the tool is used on macOS, so make sure it builds there too.
@@ -59,7 +77,8 @@ jobs:
         with:
           install_args: go
           cache: true
-      - run: go build -trimpath ./cmd/nltl-animate/
+      - name: Build for ${{ matrix.goos }}/${{ matrix.goarch }}
+        run: go build -trimpath ./cmd/nltl-animate/
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
