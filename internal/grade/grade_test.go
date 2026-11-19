@@ -33,7 +33,7 @@ func TestFilter(t *testing.T) {
 	got := g.Filter("0.02*sin(t)")
 	for _, s := range []string{
 		"gblur=sigma=0.6:steps=1",
-		"eq=brightness='0.02*sin(t)':contrast=1.15:saturation=0.70",
+		"eq=brightness='0.02*sin(t)':contrast=1.15:saturation=0.70:eval=frame", // per frame, or the pulse never moves
 		"vignette=angle=0.518363", // 33% of PI/2
 		"noise=alls=25:allf=t+u",
 	} {
@@ -46,7 +46,7 @@ func TestFilter(t *testing.T) {
 // Every dial at 0 leaves the image untouched.
 func TestZeroIsUntouched(t *testing.T) {
 	got := Grade{Name: "none"}.Filter("0")
-	want := "gblur=sigma=0.0:steps=1,eq=brightness='0':contrast=1.00:saturation=1.00,vignette=angle=0.000000,noise=alls=0:allf=t+u"
+	want := "gblur=sigma=0.0:steps=1,eq=brightness='0':contrast=1.00:saturation=1.00:eval=frame,vignette=angle=0.000000,noise=alls=0:allf=t+u"
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
