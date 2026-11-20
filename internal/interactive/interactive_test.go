@@ -13,7 +13,8 @@ func TestNamedOptions(t *testing.T) {
 	opts, names := namedOptions(custom, grade.Names(), grade.Get,
 		func(g grade.Grade) (string, string) { return g.Name, g.Description })
 
-	want := []string{"mine", "dark", "clean", "muted"}
+	// Custom first, then the built-ins not shadowed by a custom one.
+	want := append([]string{"mine", "dark"}, slices.DeleteFunc(grade.Names(), func(n string) bool { return n == "dark" })...)
 	if !slices.Equal(names, want) {
 		t.Errorf("names = %v, want %v", names, want)
 	}
@@ -23,7 +24,7 @@ func TestNamedOptions(t *testing.T) {
 
 	_, names = namedOptions(nil, motion.Names(), motion.Get,
 		func(m motion.Motion) (string, string) { return m.Name, m.Description })
-	if !slices.Equal(names, []string{"gentle", "restless", "shifting", "steady", "still"}) {
+	if !slices.Equal(names, motion.Names()) {
 		t.Errorf("motion names = %v", names)
 	}
 }

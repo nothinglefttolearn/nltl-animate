@@ -222,7 +222,7 @@ func TestDrawBilinearTransparencyAndOpacity(t *testing.T) {
 	}
 
 	dst := solid(40, 40, bg)
-	drawBilinear(dst, src, 0, 0, 40, 40, 1, noTint)
+	drawBilinear(dst, src, 0, 0, 40, 40, 1, noShade)
 	if c := dst.RGBAAt(5, 20); c.R != 255 || c.B != 0 {
 		t.Errorf("opaque half should cover background, got %v", c)
 	}
@@ -231,7 +231,7 @@ func TestDrawBilinearTransparencyAndOpacity(t *testing.T) {
 	}
 
 	dst = solid(40, 40, bg)
-	drawBilinear(dst, src, 0, 0, 40, 40, 0.5, noTint)
+	drawBilinear(dst, src, 0, 0, 40, 40, 0.5, noShade)
 	if c := dst.RGBAAt(5, 20); c.R < 120 || c.R > 135 || c.B < 120 || c.B > 135 || c.A != 255 {
 		t.Errorf("50%% opacity should blend evenly, got %v", c)
 	}
@@ -240,8 +240,8 @@ func TestDrawBilinearTransparencyAndOpacity(t *testing.T) {
 func TestDrawBilinearClipsOffscreen(t *testing.T) {
 	dst := solid(10, 10, color.RGBA{A: 255})
 	src := solid(4, 4, color.RGBA{R: 255, A: 255})
-	drawBilinear(dst, src, -1000, -1000, 5000, 5000, 1, noTint) // huge, mostly offscreen
-	drawBilinear(dst, src, 50, 50, 5, 5, 1, noTint)             // fully offscreen
+	drawBilinear(dst, src, -1000, -1000, 5000, 5000, 1, noShade) // huge, mostly offscreen
+	drawBilinear(dst, src, 50, 50, 5, 5, 1, noShade)             // fully offscreen
 	if c := dst.RGBAAt(5, 5); c.R != 255 {
 		t.Errorf("got %v", c)
 	}

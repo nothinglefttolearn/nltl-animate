@@ -13,15 +13,15 @@ import (
 )
 
 // Cycle shows a random one of its images on every frame (or every Hold
-// frames), never the same image twice in a row. With a tint, every switch is
-// a new appearance with its own cast, so even a single image changes color
-// on every switch. It implements ffmpeg.FrameSource.
+// frames), never the same image twice in a row. With a shade, every switch is
+// a new appearance with its own shade, so even a single image gets lighter or
+// darker on every switch. It implements ffmpeg.FrameSource.
 type Cycle struct {
-	// Loop makes the sequence repeat: see LoopSequence. The casts then
+	// Loop makes the sequence repeat: see LoopSequence. The shades then
 	// repeat with the clip.
 	Loop bool
-	// Tint gives each switch its own cast.
-	Tint motion.Tinter
+	// Shade gives each switch its own shade.
+	Shade motion.Shader
 
 	w, h   int
 	images []*image.RGBA
@@ -53,18 +53,18 @@ func (c *Cycle) WriteFrames(w io.Writer, n int) error {
 	if c.Loop {
 		seq = LoopSequence
 	}
-	var tinted []byte
-	if c.Tint.On() {
-		tinted = make([]byte, c.w*c.h*4)
+	var shaded []byte
+	if c.Shade.On() {
+		shaded = make([]byte, c.w*c.h*4)
 	}
-	period := castPeriod(c.Loop, n, c.hold, 1)
+	period := shadePeriod(c.Loop, n, c.hold, 1)
 	for i, idx := range seq(len(c.images), n, c.hold, c.seed) {
 		frame := c.images[idx].Pix
-		if tinted != nil {
+		if shaded != nil {
 			if i%c.hold == 0 {
-				newTintTable(c.Tint.Cast(i/c.hold, period)).copy(tinted, frame)
+				newShadeTable(c.Shade.Gain(i/c.hold, period)).copy(shaded, frame)
 			}
-			frame = tinted
+			frame = shaded
 		}
 		if _, err := w.Write(frame); err != nil {
 			return err

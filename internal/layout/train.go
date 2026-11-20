@@ -36,8 +36,8 @@ type TrainOptions struct {
 	// that time. See TrainLoopFrames.
 	LoopFrames int
 
-	// Tint gives every car its own cast for its whole trip.
-	Tint motion.Tinter
+	// Shade gives every car its own shade for its whole trip.
+	Shade motion.Shader
 }
 
 func DefaultTrainOptions() TrainOptions {
@@ -133,7 +133,7 @@ type Train struct {
 	length   float64 // track length in depth: Copies * Spacing
 	velocity float64 // world units per second
 
-	castPeriod int // cars per loop, so the casts repeat with it; 0 = no loop
+	shadePeriod int // cars per loop, so the shades repeat with it; 0 = no loop
 }
 
 // trainImage is one image on the train, ready to draw.
@@ -195,7 +195,7 @@ func NewTrain(imgs []image.Image, w, h int, opts TrainOptions) (*Train, error) {
 		n := float64(len(imgs))
 		cycles := max(1, math.Round(loopSec*perSecond/n))
 		perSecond = cycles * n / loopSec
-		t.castPeriod = int(cycles) * len(imgs)
+		t.shadePeriod = int(cycles) * len(imgs)
 	}
 	t.velocity = perSecond * opts.Spacing
 	return t, nil
@@ -203,13 +203,13 @@ func NewTrain(imgs []image.Image, w, h int, opts TrainOptions) (*Train, error) {
 
 func (t *Train) Size() (int, int) { return t.w, t.h }
 
-// copyState is one copy's depth, opacity, image and cast at a moment in
+// copyState is one copy's depth, opacity, image and shade at a moment in
 // time.
 type copyState struct {
 	z, alpha float64
-	car      int // which car of the endless train this copy is right now
-	img      int // index into Train.imgs
-	cast     motion.Cast
+	car      int     // which car of the endless train this copy is right now
+	img      int     // index into Train.imgs
+	gain     float64 // shade
 }
 
 // copies returns every copy at time sec, sorted far to near (draw order).
@@ -233,7 +233,7 @@ func (t *Train) copies(sec float64) []copyState {
 		alpha := (1 - t.opts.Fog*frac) * clamp01((1-frac)/fadeInFraction)
 		cs[k] = copyState{
 			z: t.near + d, alpha: alpha, car: n,
-			img: posMod(n, len(t.imgs)), cast: t.opts.Tint.Cast(n, t.castPeriod),
+			img: posMod(n, len(t.imgs)), gain: t.opts.Shade.Gain(n, t.shadePeriod),
 		}
 	}
 	slices.SortFunc(cs, func(a, b copyState) int { return cmp.Compare(b.z, a.z) }) // far first
@@ -263,7 +263,7 @@ func (t *Train) RenderFrame(dst *image.RGBA, i int) {
 		if left+width < 0 || left > float64(t.w) || height < 0.5 {
 			continue
 		}
-		drawBilinear(dst, img.mipFor(height), left, top, width, height, c.alpha, gains(c.cast))
+		drawBilinear(dst, img.mipFor(height), left, top, width, height, c.alpha, float32(c.gain))
 	}
 }
 
@@ -347,11 +347,11 @@ func halve(src *image.RGBA) *image.RGBA {
 }
 
 // drawBilinear composites src, scaled to the sub-pixel rectangle
-// (left, top, width, height), over dst with an extra opacity and a gain per
-// color channel (the tint; noTint for none). Both images are premultiplied
+// (left, top, width, height), over dst with an extra opacity and a brightness
+// gain (the shade; noShade for none). Both images are premultiplied
 // RGBA. Samples outside src are transparent, which anti-aliases the copy's
 // edges.
-func drawBilinear(dst, src *image.RGBA, left, top, width, height, opacity float64, tint [3]float32) {
+func drawBilinear(dst, src *image.RGBA, left, top, width, height, opacity float64, shade float32) {
 	sw, sh := src.Bounds().Dx(), src.Bounds().Dy()
 	db := dst.Bounds()
 	x0 := max(db.Min.X, int(math.Floor(left)))
@@ -365,7 +365,7 @@ func drawBilinear(dst, src *image.RGBA, left, top, width, height, opacity float6
 	sx := float64(sw) / width
 	sy := float64(sh) / height
 	op := float32(opacity)
-	opR, opG, opB := op*tint[0], op*tint[1], op*tint[2]
+	opC := op * shade
 
 	texel := func(x, y int) (r, g, b, a float32) {
 		if x < 0 || y < 0 || x >= sw || y >= sh {
@@ -397,10 +397,10 @@ func drawBilinear(dst, src *image.RGBA, left, top, width, height, opacity float6
 			if a <= 0 {
 				continue
 			}
-			// A tinted channel can pass its alpha; to8 clamps it.
-			r := (r00*w00 + r10*w10 + r01*w01 + r11*w11) * opR
-			g := (g00*w00 + g10*w10 + g01*w01 + g11*w11) * opG
-			b := (b00*w00 + b10*w10 + b01*w01 + b11*w11) * opB
+			// A lightened channel can pass its alpha; to8 clamps it.
+			r := (r00*w00 + r10*w10 + r01*w01 + r11*w11) * opC
+			g := (g00*w00 + g10*w10 + g01*w01 + g11*w11) * opC
+			b := (b00*w00 + b10*w10 + b01*w01 + b11*w11) * opC
 
 			// Premultiplied "over": dst = src + dst*(1-srcAlpha).
 			k := 1 - a/255

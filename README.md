@@ -8,7 +8,7 @@ Every clip is made of three independent choices:
 
 - a **layout**: how the images are arranged in the frame (`single`, `grid`, `train`);
 - a **grade**: how the picture looks (contrast, saturation, softness, vignette, grain);
-- a **motion**: how the picture moves with the beat (breath, shake, pulse, tint).
+- a **motion**: how the picture moves with the beat (breath, shake, pulse, shade).
 
 See [CONTEXT.md](CONTEXT.md) for the full vocabulary.
 
@@ -53,7 +53,7 @@ nltl-animate --grade muted --motion steady --bpm 138 demo.wav cover.jpg
 # Detect the tempo instead of passing it
 nltl-animate --grade dark --motion restless --bpm auto demo.wav cover.jpg
 
-# Every image shown in a different color
+# Every image shown a little lighter or darker
 nltl-animate --motion shifting --bpm 138 demo.wav cover.jpg
 
 # A photograph that should not move at all
@@ -78,10 +78,10 @@ If the file already exists (two renders in the same second), you are asked befor
 With `--no-audio` there is no audio file: every argument is an image, and the output is a silent clip that loops seamlessly when played on repeat. It works with every layout, saved next to the first image.
 
 - **Several images (single, grid):** the clip is one pass through the images. They are shuffled once (by `--seed`) and each is shown once, for `--hold`/`--hold-beats`, so playing it on repeat shows the same sequence over and over, with the loop point falling exactly on an image switch. With `--tiles mixed` there is one step per image, and every tile also changes image at the loop point.
-- **One image (single, grid):** 3 seconds, long enough for the motion's breath and shake to read as movement. With a tint, it is rounded up to whole switches.
+- **One image (single, grid):** 3 seconds, long enough for the motion's breath and shake to read as movement. With a shade, it is rounded up to whole switches.
 - **train:** as long as it takes one car per image to pass (at least 3 seconds with one image). The speed is nudged slightly so that is a whole number of frames, and the last frame leads straight back into the first.
 
-Tints repeat with the loop, so no tile or car changes color at the loop point. The motion's breath, shake and pulse are not matched up at the loop point; they are jumpy anyway. `--bpm <number>` still sets the tempo of the motion and switching; `--bpm auto` needs audio. `--preview` stops at 10 seconds, which cuts long loops short.
+Shades repeat with the loop, so no tile or car changes brightness at the loop point. The motion's breath, shake and pulse are not matched up at the loop point; they are jumpy anyway. `--bpm <number>` still sets the tempo of the motion and switching; `--bpm auto` needs audio. `--preview` stops at 10 seconds, which cuts long loops short.
 
 ```bash
 nltl-animate --no-audio cover.jpg                                    # 3s loop
@@ -185,6 +185,12 @@ A grade is the fixed color and texture of the picture. Nothing in it follows the
 | `clean` | +5 | 0 | 3 | 20 | 8 | Full color, light vignette, a trace of grain |
 | `muted` | +15 | -30 | 6 | 33 | 25 | Pulled-back color, visible grain, medium vignette (default) |
 | `dark` | +30 | -60 | 8 | 50 | 40 | Little color, hard contrast, heavy grain and vignette |
+| `vivid` | +20 | +45 | 0 | 15 | 5 | Boosted color, crisp and clean |
+| `faded` | -30 | -20 | 5 | 10 | 15 | Flat, washed-out color, like an old print |
+| `dream` | -10 | +10 | 40 | 40 | 10 | Hazy and smeared, soft dark corners |
+| `mono` | +25 | -100 | 4 | 45 | 30 | Black and white, punchy, with grain |
+| `grit` | +20 | -20 | 0 | 30 | 80 | Sharp, with very heavy grain |
+| `tunnel` | +10 | -10 | 5 | 90 | 20 | A spotlight: everything near the edges falls to black |
 
 ## Motions
 
@@ -197,19 +203,22 @@ A motion is everything that moves in time with the beat. Strengths are percentag
 | `shake` | 0 to 10 | how far the frame drifts and jitters, % (at a fixed rate, every 2 beats) |
 | `pulse` | 0 to 100 | how much the brightness swells, % |
 | `pulse_beats` | > 0 | beats per pulse |
-| `tint` | 0 to 50 | how far each image shown leans toward its own color, % |
+| `shade` | 0 to 50 | how much lighter or darker each image shown can be, % |
 
-| Motion | breath | breath_beats | shake | pulse | pulse_beats | tint | |
+| Motion | breath | breath_beats | shake | pulse | pulse_beats | shade | |
 |--------|-------:|-------------:|------:|------:|------------:|-----:|---|
 | `still` | 0 | — | 0 | 0 | — | 0 | No movement at all (suggested for photographs) |
 | `gentle` | 0.5 | 16 | 0.1 | 1 | 8 | 0 | Slow, barely-there drift |
 | `steady` | 1 | 8 | 0.2 | 2 | 4 | 0 | Noticeable breathing that keeps time (default) |
 | `restless` | 1.5 | 4 | 0.3 | 4 | 2 | 0 | Fast, deep breathing and a strong pulse |
-| `shifting` | 1 | 8 | 0.2 | 2 | 4 | 10 | Steady, with every image in a different color |
+| `drift` | 4 | 32 | 0 | 0 | — | 0 | A deep, very slow zoom and nothing else |
+| `nervous` | 0.5 | 8 | 1.5 | 1 | 4 | 0 | A strong shake over light breathing |
+| `pound` | 1 | 2 | 0.2 | 12 | 1 | 0 | A hard pulse on every beat |
+| `shifting` | 1 | 8 | 0.2 | 2 | 4 | 15 | Steady, with every image a little lighter or darker |
 
-### Tint
+### Shade
 
-With a tint, every image shown gets its own color cast: each switch in single, each tile at each switch in grid (even with `--tiles same` or a single image), and each car of the train for its whole trip. The color changes but the brightness doesn't, and each new cast leans a long way around the color wheel from the last, so neighbors always clearly differ. At `tint: 10`, red, green and blue each move by at most 10%. A single image with a tint switches like several images do, every beat with `--bpm` or as set by `--hold`/`--hold-beats`. The colors follow `--seed`. The grade is applied afterward, so a low-saturation grade like `dark` mutes the tint too.
+With a shade, every image shown is a little lighter or darker than the original, picked at random: each switch in single, each tile at each switch in grid (even with `--tiles same` or a single image), and each car of the train for its whole trip. The image's colors don't change, only its brightness, and it stays that way while the image is on screen. At `shade: 15`, each image is somewhere between 15% darker and 15% lighter. A single image with a shade switches like several images do, every beat with `--bpm` or as set by `--hold`/`--hold-beats`. The shades follow `--seed`.
 
 The frame is always zoomed in just enough that the breath and shake never show the image's edges.
 

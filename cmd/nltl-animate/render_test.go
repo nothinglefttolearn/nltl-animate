@@ -499,13 +499,13 @@ func TestLoopFrames(t *testing.T) {
 		}, 4 * 2},
 		{"train one image", func(o *renderOptions) { o.Layout = layoutTrain }, 100},
 		{"train several images", func(o *renderOptions) { o.Layout, o.ImagePaths = layoutTrain, []string{"a", "b"} }, 40},
-		// A tinted single image cycles through casts: whole switches, at
+		// A shaded single image cycles through shades: whole switches, at
 		// least oneImageLoopSeconds.
-		{"one image tinted", func(o *renderOptions) { o.Tinted = true }, 6 * defaultHoldFrames},
-		{"one image tinted at a bpm", func(o *renderOptions) { o.Tinted, o.BPM = true, 138 }, 7 * 13},
-		{"grid one image tinted", func(o *renderOptions) { o.Layout, o.Tinted = layoutGrid, true }, 90},
-		{"several images tinted", func(o *renderOptions) { o.ImagePaths, o.Tinted = []string{"a", "b"}, true }, 2 * defaultHoldFrames},
-		{"train tinted", func(o *renderOptions) { o.Layout, o.Tinted = layoutTrain, true }, 100},
+		{"one image shaded", func(o *renderOptions) { o.Shaded = true }, 6 * defaultHoldFrames},
+		{"one image shaded at a bpm", func(o *renderOptions) { o.Shaded, o.BPM = true, 138 }, 7 * 13},
+		{"grid one image shaded", func(o *renderOptions) { o.Layout, o.Shaded = layoutGrid, true }, 90},
+		{"several images shaded", func(o *renderOptions) { o.ImagePaths, o.Shaded = []string{"a", "b"}, true }, 2 * defaultHoldFrames},
+		{"train shaded", func(o *renderOptions) { o.Layout, o.Shaded = layoutTrain, true }, 100},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -586,7 +586,7 @@ func TestCLINoAudioArgErrors(t *testing.T) {
 	}
 }
 
-func TestCLITint(t *testing.T) {
+func TestCLIShade(t *testing.T) {
 	dir := t.TempDir()
 	audio := filepath.Join(dir, "song.wav")
 	red := writePNG(t, dir, "red.png", color.RGBA{R: 255, A: 255})
@@ -596,7 +596,7 @@ func TestCLITint(t *testing.T) {
 	t.Run("single image", func(t *testing.T) {
 		args, stdin := runCLI(t, "--motion", "shifting", audio, red)
 		if argAfter(args, "-i") != "pipe:0" || stdin != frameBytes {
-			t.Errorf("a tinted single image should stream tinted copies: %v (stdin %s)", args, stdin)
+			t.Errorf("a shaded single image should stream shaded copies: %v (stdin %s)", args, stdin)
 		}
 		if out := args[len(args)-1]; !strings.HasSuffix(out, "nltl_animate_single_audio_"+stamp+".mp4") {
 			t.Errorf("output = %s", out)
@@ -609,21 +609,21 @@ func TestCLITint(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			args, stdin := runCLI(t, append([]string{"grid", "--n", "2", "--motion", "shifting", audio}, extra...)...)
-			// Each tile has its own cast, so frames are the whole grid
+			// Each tile has its own shade, so frames are the whole grid
 			// and every tile moves separately.
 			if argAfter(args, "-video_size") != "1080x1080" || stdin != frameBytes {
-				t.Errorf("tinted grid should stream whole-grid frames: %v (stdin %s)", args, stdin)
+				t.Errorf("shaded grid should stream whole-grid frames: %v (stdin %s)", args, stdin)
 			}
 			if fc := argAfter(args, "-filter_complex"); strings.Count(fc, "zoompan") != 4 {
-				t.Errorf("tinted grid should move each tile separately: %s", fc)
+				t.Errorf("shaded grid should move each tile separately: %s", fc)
 			}
 		})
 	}
 
-	t.Run("no tint keeps the still image", func(t *testing.T) {
+	t.Run("no shade keeps the still image", func(t *testing.T) {
 		args, _ := runCLI(t, "grid", "--n", "2", "--motion", "steady", audio, red)
 		if argAfter(args, "-i") != red {
-			t.Errorf("an untinted grid of one image should loop the still image: %v", args)
+			t.Errorf("an unshaded grid of one image should loop the still image: %v", args)
 		}
 	})
 
@@ -635,14 +635,14 @@ func TestCLITint(t *testing.T) {
 	})
 }
 
-func TestHeadlessCommandTint(t *testing.T) {
+func TestHeadlessCommandShade(t *testing.T) {
 	o := opts(layoutSingle, "a.png")
-	o.MotionName, o.Tinted, o.Seed, o.HoldBeats, o.BPM = "shifting", true, 5, 2, 120
+	o.MotionName, o.Shaded, o.Seed, o.HoldBeats, o.BPM = "shifting", true, 5, 2, 120
 	if got, want := o.headlessCommand(), "nltl-animate --grade muted --motion shifting --bpm 120 --hold-beats 2 --seed 5 track.wav a.png"; got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 	o = opts(layoutTrain, "a.png")
-	o.MotionName, o.Tinted, o.Seed = "shifting", true, 6
+	o.MotionName, o.Shaded, o.Seed = "shifting", true, 6
 	if got, want := o.headlessCommand(), "nltl-animate train --grade muted --motion shifting --seed 6 track.wav a.png"; got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

@@ -27,7 +27,7 @@ func addRenderFlags(cmd *cobra.Command, o *renderOptions) {
 	f.StringVarP(&o.OutputDir, "output-dir", "o", o.OutputDir, "output directory (default: same as audio file, or first image with --no-audio)")
 	f.BoolVar(&o.Overwrite, "overwrite", o.Overwrite, "replace an existing output file without asking")
 	f.StringVarP(&o.ConfigPath, "config", "c", o.ConfigPath, "YAML config file with custom grades and motions")
-	f.Uint64Var(&o.Seed, "seed", o.Seed, "with several images or a tint: random seed for the image order and colors (0 = new each run)")
+	f.Uint64Var(&o.Seed, "seed", o.Seed, "with several images or a shade: random seed for the image order and shades (0 = new each run)")
 }
 
 // bpmFlag is --bpm: a whole number, or "auto" to detect it from the audio.
@@ -105,11 +105,11 @@ func layoutCmd(l layoutName, use, short, long string, extra func(*cobra.Command,
 }
 
 // addSwitchFlags registers the flags for layouts that switch between several
-// images, or tints, over time (single and grid).
+// images, or shades, over time (single and grid).
 func addSwitchFlags(cmd *cobra.Command, o *renderOptions) {
 	f := cmd.Flags()
-	f.IntVar(&o.Hold, "hold", o.Hold, "with several images or a tint: frames to show each image for (default: 1 beat with --bpm, else 15)")
-	f.Float64Var(&o.HoldBeats, "hold-beats", o.HoldBeats, "with several images or a tint: beats to show each image for (needs --bpm)")
+	f.IntVar(&o.Hold, "hold", o.Hold, "with several images or a shade: frames to show each image for (default: 1 beat with --bpm, else 15)")
+	f.Float64Var(&o.HoldBeats, "hold-beats", o.HoldBeats, "with several images or a shade: beats to show each image for (needs --bpm)")
 }
 
 func gridCmd() *cobra.Command {
@@ -127,8 +127,8 @@ image twice in a row), every beat with --bpm or as set by --hold/--hold-beats:
   --tiles mixed   each tile shows a different image and switches on its own
                   sequence (all tiles switch at the same moments)
 
-With a motion that has a tint (e.g. --motion shifting), every tile gets its
-own color at every switch, even with a single image.
+With a motion that has a shade (e.g. --motion shifting), every tile gets its
+own lighter or darker shade at every switch, even with a single image.
 
 Every run prints its --seed so a clip can be reproduced exactly.
 
@@ -160,7 +160,8 @@ line up along the track.
 With --bpm, one copy passes every --beats beats; otherwise --speed copies
 pass per second. --vanish moves the vanishing point to the right to fill more
 of the frame. The motion and grade are applied over the result; a motion
-with a tint (e.g. --motion shifting) gives every car its own color.
+with a shade (e.g. --motion shifting) makes every car a little lighter or
+darker.
 
 With --no-audio, the silent clip loops seamlessly: it lasts while one copy of
 each image passes (at least 3 seconds with a single image), with the speed
