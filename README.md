@@ -35,7 +35,7 @@ This needs [Go](https://go.dev) 1.27.4 or newer. To build from a clone instead, 
 
 ## Getting started
 
-### Your first clip
+### Default Settings
 
 Pass an audio file and an image:
 
@@ -51,7 +51,7 @@ A full render takes a while, so add `--preview` to render the first 10 seconds a
 nltl-animate --preview track.wav cover.jpg
 ```
 
-### Keep time with the music
+### Tempo Sync
 
 The movement lands on the beat: without `--bpm`, the tool detects the track's tempo and prints the BPM it found. Pass the tempo yourself to skip detection or override it:
 
@@ -60,7 +60,7 @@ nltl-animate track.wav cover.jpg                 # detects the tempo
 nltl-animate --bpm 138 track.wav cover.jpg
 ```
 
-### Choose a look
+### Grades and Motions
 
 The default is the `muted` grade (pulled-back color, grain, a vignette) with the `steady` motion (slow breathing in time). Pick others by name:
 
@@ -73,9 +73,9 @@ nltl-animate --grade clean --motion still track.wav photo.jpg   # a photo that s
 
 <img src="docs/examples/grades.jpg" alt="The same image under the clean, muted, dark, mono, dream and tunnel grades">
 
-### Use several images
+### Multiple Images
 
-With several images, the clip jumps to a different one on every beat:
+With multiple images, the clip jumps to a different one on every beat:
 
 ```bash
 nltl-animate --bpm 138 track.wav frames/*.png
@@ -84,7 +84,7 @@ nltl-animate --bpm 138 --hold-beats 4 track.wav frames/*.png     # every 4 beats
 
 <img src="docs/examples/cycle.gif" width="240" alt="Several images switching on every beat">
 
-### Try another layout
+### Layouts
 
 ```bash
 nltl-animate grid --n 3 --tiles mixed --bpm 138 track.wav frames/*.png   # a different image per tile
@@ -93,7 +93,7 @@ nltl-animate train --bpm 138 track.wav logo.png                          # one c
 
 The train works best with a PNG with transparency, such as a logo or a cut-out.
 
-### Make a silent loop
+### Silent Loops
 
 `--no-audio` drops the track: every argument is an image, and the clip loops seamlessly when played on repeat. The examples on this page were made this way.
 
@@ -102,7 +102,7 @@ nltl-animate --no-audio cover.jpg                    # a 3 second loop
 nltl-animate --no-audio --bpm 120 frames/*.png       # each image once, one per beat
 ```
 
-### Or let it ask
+### Interactive Mode
 
 Run `nltl-animate` with no arguments, in a folder with your audio and images, and a form asks for everything. It can render a preview, open it, and let you adjust the grade and motion before the full render. Afterwards it prints the equivalent command so you can run it again.
 
