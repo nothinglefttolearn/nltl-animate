@@ -20,6 +20,7 @@ import (
 	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
 	"github.com/nothinglefttolearn/nltl-animate/internal/layout"
 	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
+	"github.com/nothinglefttolearn/nltl-animate/internal/outdir"
 	"github.com/nothinglefttolearn/nltl-animate/internal/tempo"
 	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
@@ -62,16 +63,24 @@ type renderOptions struct {
 	AutoBPM    bool // detect BPM from the audio; BPM is filled in by renderClip
 	Preview    bool
 	Verbose    bool
-	OutputDir  string
+	OutputDir  string // --output-dir; renderClip fills it from outdir.EnvVar when empty
 	ConfigPath string
 
-	// switching between several images, or tints (single and grid)
+	// OutputFile, when set, replaces the generated output file name (the
+	// interactive preview).
+	OutputFile string
+
+	// outputDirFrom names where OutputDir came from (outdir.FlagSource or
+	// outdir.EnvVar); renderClip fills it in.
+	outputDirFrom string
+
+	// switching between several images, or shades (single and grid)
 	Hold      int     // frames per image; 0 = default (see holdFrames)
 	HoldBeats float64 // beats per image; 0 = default
-	Seed      uint64  // image order and tints; 0 = pick one at render time
+	Seed      uint64  // image order and shades; 0 = pick one at render time
 
-	// Tinted is whether the motion has a tint; renderClip fills it in.
-	Tinted bool
+	// Shaded is whether the motion has a shade; renderClip fills it in.
+	Shaded bool
 
 	// grid
 	GridN int
@@ -210,16 +219,16 @@ func (o *renderOptions) switches() bool {
 }
 
 // steps reports whether the clip moves through new appearances every hold:
-// switching images, or a tint giving even a single image a new cast on
+// switching images, or a shade giving even a single image a new shade on
 // every switch. (Train has its own pace.)
 func (o *renderOptions) steps() bool {
-	return o.switches() || o.Tinted && o.Layout != layoutTrain
+	return o.switches() || o.Shaded && o.Layout != layoutTrain
 }
 
 // seeded reports whether the clip uses the random seed: for the image order
-// or the tints.
+// or the shades.
 func (o *renderOptions) seeded() bool {
-	return o.switches() || o.Tinted
+	return o.switches() || o.Shaded
 }
 
 // holdFrames is how many frames each image shows: --hold-beats, then
@@ -247,6 +256,25 @@ const timestampLayout = "20060102-150405"
 // now is the clock for output file names; tests replace it.
 var now = time.Now
 
+// resolveOutputDir picks the output directory from --output-dir or
+// outdir.EnvVar and checks it before anything is rendered. With neither,
+// outputPath writes next to the input.
+func (o *renderOptions) resolveOutputDir() error {
+	dir, from := o.OutputDir, o.outputDirFrom
+	if from == "" {
+		dir, from = outdir.Resolve(o.OutputDir)
+	}
+	if dir == "" {
+		return nil
+	}
+	checked, err := outdir.Check(dir)
+	if err != nil {
+		return fmt.Errorf("%w (from %s)", err, from)
+	}
+	o.OutputDir, o.outputDirFrom = checked, from
+	return nil
+}
+
 // outputPath is nltl_animate_{layout}[_detail]_{audio|loop_noaudio}[_preview]_{timestamp}.mp4
 // next to the audio file, or the first image with --no-audio (or in
 // --output-dir).
@@ -258,6 +286,9 @@ func (o *renderOptions) outputPath(at time.Time) string {
 			near = o.ImagePaths[0]
 		}
 		dir = filepath.Dir(near)
+	}
+	if o.OutputFile != "" {
+		return filepath.Join(dir, o.OutputFile)
 	}
 
 	var suffix string
@@ -323,7 +354,7 @@ func (o *renderOptions) confirmOverwrite(path string) error {
 // loopFrames is the length of a silent clip, chosen so it loops seamlessly:
 // one pass through the image sequence (each image once, or for train one
 // image cycle of the cars), or oneImageLoopSeconds with a single image
-// (rounded up to whole switches when it is tinted). The tints repeat with
+// (rounded up to whole switches when it is shaded). The shades repeat with
 // the loop. The motion's breath and shake are not matched up at the loop
 // point; they are jumpy anyway.
 func (o *renderOptions) loopFrames() int {
@@ -351,8 +382,8 @@ func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Optio
 	case o.Layout == layoutGrid && !o.steps():
 		return ffmpeg.Options{ImagePath: o.ImagePaths[0], Filter: layout.GridFilter(m, g, w, h, o.GridN, o.BPM)}, nil
 
-	// Mixed tiles, or tinted tiles that each need their own cast.
-	case o.Layout == layoutGrid && (o.Tiles == tilesMixed && o.switches() || o.Tinted):
+	// Mixed tiles, or shaded tiles that each need their own shade.
+	case o.Layout == layoutGrid && (o.Tiles == tilesMixed && o.switches() || o.Shaded):
 		tw, th := layout.GridTileSize(w, h, o.GridN)
 		imgs, err := loadCovered(o.ImagePaths, tw, th)
 		if err != nil {
@@ -366,7 +397,7 @@ func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Optio
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		src.Loop, src.Tint = o.NoAudio, m.Tinter(o.Seed)
+		src.Loop, src.Shade = o.NoAudio, m.Shader(o.Seed)
 		return ffmpeg.Options{Frames: src, Filter: layout.MosaicFilter(m, g, w, h, o.GridN, o.BPM)}, nil
 
 	case o.Layout == layoutGrid: // same image in every tile, switching together
@@ -391,7 +422,7 @@ func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Optio
 		if err != nil {
 			return ffmpeg.Options{}, err
 		}
-		src.Loop, src.Tint = o.NoAudio, m.Tinter(o.Seed)
+		src.Loop, src.Shade = o.NoAudio, m.Shader(o.Seed)
 		return ffmpeg.Options{Frames: src, Filter: layout.Filter(m, g, w, h, o.BPM)}, nil
 
 	case o.Layout == layoutTrain:
@@ -406,7 +437,7 @@ func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Optio
 			imgs = append(imgs, frames.ToRGBA(img))
 		}
 		train := o.Train
-		train.Tint = m.Tinter(o.Seed)
+		train.Shade = m.Shader(o.Seed)
 		if o.NoAudio {
 			train.LoopFrames = o.loopFrames()
 		}
@@ -442,14 +473,14 @@ func (o *renderOptions) layoutSummary() string {
 		switch {
 		case o.switches():
 			return fmt.Sprintf("single — %d images, new image %s (seed %d)", len(o.ImagePaths), o.holdSummary(), o.Seed)
-		case o.Tinted:
-			return fmt.Sprintf("single — new tint %s (seed %d)", o.holdSummary(), o.Seed)
+		case o.Shaded:
+			return fmt.Sprintf("single — new shade %s (seed %d)", o.holdSummary(), o.Seed)
 		}
 	case layoutGrid:
 		grid := fmt.Sprintf("grid — %d×%d", o.GridN, o.GridN)
 		switch {
-		case !o.switches() && o.Tinted:
-			return fmt.Sprintf("%s, a new tint in every tile %s (seed %d)", grid, o.holdSummary(), o.Seed)
+		case !o.switches() && o.Shaded:
+			return fmt.Sprintf("%s, a new shade in every tile %s (seed %d)", grid, o.holdSummary(), o.Seed)
 		case !o.switches():
 			return grid
 		case o.Tiles == tilesMixed:
@@ -467,8 +498,8 @@ func (o *renderOptions) layoutSummary() string {
 		case o.BPM > 0:
 			rate = fmt.Sprintf("one every %s beats", fmtFloat(o.Train.Beats))
 		}
-		if o.Tinted {
-			rate += fmt.Sprintf(", a tint per car (seed %d)", o.Seed)
+		if o.Shaded {
+			rate += fmt.Sprintf(", a shade per car (seed %d)", o.Seed)
 		}
 		if n := len(o.ImagePaths); n > 1 {
 			return fmt.Sprintf("train — %d copies cycling %d images, %s", o.Train.Copies, n, rate)
@@ -494,7 +525,7 @@ func (o *renderOptions) holdSummary() string {
 
 // headlessCommand returns the flag-driven invocation equivalent to o. Layout
 // flags are included only when they differ from the defaults; the grade,
-// motion and seed (when the image order or tints use it) are always included
+// motion and seed (when the image order or shades use it) are always included
 // so the clip can be reproduced.
 func (o *renderOptions) headlessCommand() string {
 	d := defaultRenderOptions()
@@ -515,7 +546,7 @@ func (o *renderOptions) headlessCommand() string {
 	if o.ConfigPath != "" {
 		parts = append(parts, "--config", o.ConfigPath)
 	}
-	if o.OutputDir != "" {
+	if o.OutputDir != "" && o.outputDirFrom != outdir.EnvVar { // the variable still applies
 		parts = append(parts, "--output-dir", o.OutputDir)
 	}
 
@@ -574,11 +605,14 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	if err := o.validate(); err != nil {
 		return err
 	}
+	if err := o.resolveOutputDir(); err != nil {
+		return err
+	}
 	outPath := o.outputPath(now())
 	if err := o.confirmOverwrite(outPath); err != nil {
 		return err
 	}
-	if o.AutoBPM {
+	if o.AutoBPM && o.BPM == 0 { // a second render of the same clip keeps the first detection
 		bpm, err := detectBPM(o.AudioPath)
 		if err != nil {
 			return err
@@ -593,7 +627,7 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	o.Tinted = m.Tint > 0
+	o.Shaded = m.Shade > 0
 	if o.seeded() && o.Seed == 0 {
 		o.Seed = rand.Uint64() | 1 //nolint:gosec // visual randomness; |1 keeps it non-zero
 	}

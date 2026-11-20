@@ -1,7 +1,6 @@
 package motion
 
 import (
-	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -96,11 +95,11 @@ func TestSummary(t *testing.T) {
 		t.Errorf("Summary = %q, want %q", got, want)
 	}
 	shifting, _ := Get("shifting")
-	if got, want := shifting.Summary(), "1% breath every 8 beats, 0.2% shake, 2% pulse every 4 beats, 10% tint"; got != want {
+	if got, want := shifting.Summary(), "1% breath every 8 beats, 0.2% shake, 2% pulse every 4 beats, 15% shade"; got != want {
 		t.Errorf("shifting Summary = %q, want %q", got, want)
 	}
 	still, _ := Get("still")
-	if got := still.Summary(); got != "no breath, shake, pulse or tint" {
+	if got := still.Summary(); got != "no breath, shake, pulse or shade" {
 		t.Errorf("still Summary = %q", got)
 	}
 }
@@ -115,8 +114,8 @@ func TestValidate(t *testing.T) {
 		{"valid", func(*Motion) {}, nil},
 		{"missing name", func(m *Motion) { m.Name = "" }, []string{"name is required"}},
 		{"zero beats", func(m *Motion) { m.BreathBeats, m.PulseBeats = 0, 0 }, []string{"breath_beats", "pulse_beats"}},
-		{"out of range", func(m *Motion) { m.Breath, m.Shake, m.Pulse, m.Tint = 51, 11, 101, 51 }, []string{"breath", "shake", "pulse", "tint"}},
-		{"negative", func(m *Motion) { m.Breath, m.Shake, m.Pulse, m.Tint = -1, -1, -1, -1 }, []string{"breath", "shake", "pulse", "tint"}},
+		{"out of range", func(m *Motion) { m.Breath, m.Shake, m.Pulse, m.Shade = 51, 11, 101, 51 }, []string{"breath", "shake", "pulse", "shade"}},
+		{"negative", func(m *Motion) { m.Breath, m.Shake, m.Pulse, m.Shade = -1, -1, -1, -1 }, []string{"breath", "shake", "pulse", "shade"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -141,100 +140,90 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-// shifting is steady with a tint, so the two only differ in color.
-func TestShiftingIsSteadyWithTint(t *testing.T) {
+// shifting is steady with a shade, so the two only differ in brightness per
+// image.
+func TestShiftingIsSteadyWithShade(t *testing.T) {
 	steady, _ := Get("steady")
 	shifting, _ := Get("shifting")
-	if shifting.Tint != 10 {
-		t.Errorf("shifting tint = %g, want 10", shifting.Tint)
+	if shifting.Shade != 15 {
+		t.Errorf("shifting shade = %g, want 15", shifting.Shade)
 	}
-	shifting.Name, shifting.Description, shifting.Tint = steady.Name, steady.Description, 0
+	shifting.Name, shifting.Description, shifting.Shade = steady.Name, steady.Description, 0
 	if shifting != steady {
-		t.Errorf("shifting should be steady plus a tint:\n%+v\n%+v", shifting, steady)
+		t.Errorf("shifting should be steady plus a shade:\n%+v\n%+v", shifting, steady)
 	}
 	for _, name := range Names() {
-		if m, _ := Get(name); name != "shifting" && m.Tint != 0 {
-			t.Errorf("%s has a tint; only shifting should", name)
+		if m, _ := Get(name); name != "shifting" && m.Shade != 0 {
+			t.Errorf("%s has a shade; only shifting should", name)
 		}
 	}
 }
 
-func TestTinterOff(t *testing.T) {
+// Every built-in dial is the main feature of at least one built-in, at a
+// strength you clearly see.
+func TestBuiltInsShowEveryDial(t *testing.T) {
+	stars := map[string]func(Motion) bool{
+		"deep breath":  func(m Motion) bool { return m.Breath >= 3 },
+		"slow breath":  func(m Motion) bool { return m.BreathBeats >= 32 },
+		"strong shake": func(m Motion) bool { return m.Shake >= 1 },
+		"hard pulse":   func(m Motion) bool { return m.Pulse >= 10 },
+		"fast pulse":   func(m Motion) bool { return m.PulseBeats <= 1 },
+		"shade":        func(m Motion) bool { return m.Shade >= 10 },
+	}
+	for what, ok := range stars {
+		if !slices.ContainsFunc(Names(), func(n string) bool { m, _ := Get(n); return ok(m) }) {
+			t.Errorf("no built-in motion shows off %s", what)
+		}
+	}
+}
+
+func TestShaderOff(t *testing.T) {
 	still, _ := Get("still")
-	tr := still.Tinter(7)
-	if tr.On() {
-		t.Error("a motion without tint should give a Tinter that is off")
+	s := still.Shader(7)
+	if s.On() {
+		t.Error("a motion without shade should give a Shader that is off")
 	}
-	if got := tr.Cast(3, 0); got != (Cast{1, 1, 1}) {
-		t.Errorf("Cast with no tint = %v, want untouched", got)
+	if got := s.Gain(3, 0); got != 1 {
+		t.Errorf("Gain with no shade = %v, want 1", got)
 	}
-	if (Tinter{}).On() {
-		t.Error("the zero Tinter should be off")
+	if (Shader{}).On() {
+		t.Error("the zero Shader should be off")
 	}
 }
 
-// angle is the direction a cast leans in, in radians.
-func angle(c Cast) float64 {
-	// Inverse of 1 + s*cos(θ - 2πk/3): project onto the cos and sin axes.
-	var x, y float64
-	for k, g := range c {
-		a := 2 * math.Pi * float64(k) / 3
-		x += (g - 1) * math.Cos(a)
-		y += (g - 1) * math.Sin(a)
-	}
-	return math.Atan2(y, x)
-}
-
-func angleBetween(a, b Cast) float64 {
-	d := math.Abs(angle(a) - angle(b))
-	return math.Min(d, 2*math.Pi-d)
-}
-
-func TestTinterCasts(t *testing.T) {
-	m, _ := Get("shifting")
-	tr := m.Tinter(42)
-	if !tr.On() {
-		t.Fatal("shifting should tint")
+func TestShaderGains(t *testing.T) {
+	m, _ := Get("shifting") // 15%
+	s := m.Shader(42)
+	if !s.On() {
+		t.Fatal("shifting should shade")
 	}
 	for _, period := range []int{0, 1, 2, 3, 7, 24, 100} {
 		n := 50
 		if period > 0 {
 			n = 2 * period
 		}
+		var lighter, darker bool
 		for i := -n; i < n; i++ {
-			c := tr.Cast(i, period)
-			// Balanced: brightness, as the mean of the gains, is unchanged.
-			if mean := (c[0] + c[1] + c[2]) / 3; math.Abs(mean-1) > 1e-9 {
-				t.Fatalf("period %d, cast %d = %v: mean %v, want 1", period, i, c, mean)
+			g := s.Gain(i, period)
+			if g < 0.85 || g > 1.15 {
+				t.Fatalf("period %d, gain %d = %v, outside 1±15%%", period, i, g)
 			}
-			// Full strength, never past it: no channel moves more than 10%,
-			// and the cast is always the same size.
-			var size float64
-			for _, g := range c {
-				if math.Abs(g-1) > 0.1+1e-9 {
-					t.Fatalf("period %d, cast %d = %v moves a channel more than 10%%", period, i, c)
-				}
-				size += (g - 1) * (g - 1)
+			lighter, darker = lighter || g > 1, darker || g < 1
+			if g != s.Gain(i, period) {
+				t.Fatalf("period %d: gain %d is not repeatable", period, i)
 			}
-			if want := 0.1 * 0.1 * 1.5; math.Abs(size-want) > 1e-9 {
-				t.Fatalf("period %d, cast %d = %v is not at full strength", period, i, c)
-			}
-			if period > 0 && tr.Cast(i+period, period) != c {
-				t.Fatalf("period %d: cast %d does not repeat", period, i)
-			}
-			// Neighbors, including across the loop point, lean clearly
-			// different ways.
-			if period != 1 {
-				if d := angleBetween(c, tr.Cast(i+1, period)); d < math.Pi/3 {
-					t.Errorf("period %d: casts %d and %d only %.0f° apart", period, i, i+1, d*180/math.Pi)
-				}
+			if period > 0 && s.Gain(i+period, period) != g {
+				t.Fatalf("period %d: gain %d does not repeat", period, i)
 			}
 		}
+		if (period == 0 || period >= 24) && (!lighter || !darker) {
+			t.Errorf("period %d: want both lighter and darker shades", period)
+		}
 	}
-	if tr.Cast(0, 0) != m.Tinter(42).Cast(0, 0) {
-		t.Error("the same seed should give the same casts")
+	if s.Gain(0, 0) == m.Shader(43).Gain(0, 0) {
+		t.Error("a different seed should give different shades")
 	}
-	if tr.Cast(0, 0) == m.Tinter(43).Cast(0, 0) {
-		t.Error("a different seed should start somewhere else")
+	if s.Gain(0, 0) == s.Gain(1, 0) {
+		t.Error("consecutive appearances got the same shade")
 	}
 }

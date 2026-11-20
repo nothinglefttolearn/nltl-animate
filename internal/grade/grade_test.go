@@ -95,3 +95,21 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+// Every dial is the main feature of at least one built-in, at a strength
+// you clearly see.
+func TestBuiltInsShowEveryDial(t *testing.T) {
+	stars := map[string]func(Grade) bool{
+		"boosted color":   func(g Grade) bool { return g.Saturation >= 40 },
+		"black and white": func(g Grade) bool { return g.Saturation == -100 },
+		"flat contrast":   func(g Grade) bool { return g.Contrast <= -25 },
+		"softness":        func(g Grade) bool { return g.Softness >= 30 },
+		"heavy vignette":  func(g Grade) bool { return g.Vignette >= 80 },
+		"heavy grain":     func(g Grade) bool { return g.Grain >= 70 },
+	}
+	for what, ok := range stars {
+		if !slices.ContainsFunc(Names(), func(n string) bool { g, _ := Get(n); return ok(g) }) {
+			t.Errorf("no built-in grade shows off %s", what)
+		}
+	}
+}

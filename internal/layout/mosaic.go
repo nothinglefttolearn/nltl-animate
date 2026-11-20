@@ -15,17 +15,17 @@ import (
 // moves to a different image than it showed before, and, when there are at
 // least as many images as tiles, no two tiles show the same image at once.
 // A same mosaic (NewSameMosaic) instead shows one image in every tile at a
-// time, in the order of Sequence. With a tint, each tile at each switch is a
-// new appearance with its own cast.
+// time, in the order of Sequence. With a shade, each tile at each switch is
+// a new appearance with its own shade.
 // It implements ffmpeg.FrameSource; frames are n tiles wide and high, with
 // no gaps (see MosaicFilter for the per-tile motion).
 type Mosaic struct {
 	// Loop makes the grid repeat: after one step per image (see
 	// MosaicLoopSequence and LoopSequence), or with a single image after
-	// the frames asked for. The casts then repeat with the clip.
+	// the frames asked for. The shades then repeat with the clip.
 	Loop bool
-	// Tint gives every tile its own cast at every switch.
-	Tint motion.Tinter
+	// Shade gives every tile its own shade at every switch.
+	Shade motion.Shader
 
 	n      int
 	tw, th int
@@ -44,8 +44,8 @@ func NewMosaic(imgs []*image.RGBA, n, hold int, seed uint64) (*Mosaic, error) {
 }
 
 // NewSameMosaic is a mosaic with the same image in every tile, switching
-// together. It differs from the plain grid only with a tint, which gives
-// every tile its own cast.
+// together. It differs from the plain grid only with a shade, which
+// gives every tile its own shade.
 func NewSameMosaic(imgs []*image.RGBA, n, hold int, seed uint64) (*Mosaic, error) {
 	if len(imgs) < 1 {
 		return nil, errors.New("grid needs at least 1 image")
@@ -89,7 +89,7 @@ func (m *Mosaic) WriteFrames(w io.Writer, n int) error {
 	default:
 		steps = MosaicSequence(len(m.images), nTiles, nSteps, m.seed)
 	}
-	period := castPeriod(m.Loop, n, m.hold, nTiles)
+	period := shadePeriod(m.Loop, n, m.hold, nTiles)
 	for i := range n {
 		if step := i / m.hold; i%m.hold == 0 {
 			m.compose(frame, steps[step%len(steps)], step*nTiles, period)
@@ -101,22 +101,22 @@ func (m *Mosaic) WriteFrames(w io.Writer, n int) error {
 	return nil
 }
 
-// compose draws each tile's image into frame, row by row. With a tint, tile
+// compose draws each tile's image into frame, row by row. With a shade, tile
 // t is appearance first+t.
 func (m *Mosaic) compose(frame *image.RGBA, tiles []int, first, period int) {
 	rowBytes := 4 * m.tw
 	for t, idx := range tiles {
 		src := m.images[idx]
-		var tint *tintTable
-		if m.Tint.On() {
-			tint = newTintTable(m.Tint.Cast(first+t, period))
+		var shade *shadeTable
+		if m.Shade.On() {
+			shade = newShadeTable(m.Shade.Gain(first+t, period))
 		}
 		x0, y0 := (t%m.n)*m.tw, (t/m.n)*m.th
 		for y := range m.th {
 			d := frame.PixOffset(x0, y0+y)
 			dst, row := frame.Pix[d:d+rowBytes], src.Pix[y*src.Stride:y*src.Stride+rowBytes]
-			if tint != nil {
-				tint.copy(dst, row)
+			if shade != nil {
+				shade.copy(dst, row)
 			} else {
 				copy(dst, row)
 			}

@@ -8,7 +8,7 @@ Every clip is made of three independent choices:
 
 - a **layout**: how the images are arranged in the frame (`single`, `grid`, `train`);
 - a **grade**: how the picture looks (contrast, saturation, softness, vignette, grain);
-- a **motion**: how the picture moves with the beat (breath, shake, pulse, tint).
+- a **motion**: how the picture moves with the beat (breath, shake, pulse, shade).
 
 See [CONTEXT.md](CONTEXT.md) for the full vocabulary.
 
@@ -53,7 +53,7 @@ nltl-animate --grade muted --motion steady --bpm 138 demo.wav cover.jpg
 # Detect the tempo instead of passing it
 nltl-animate --grade dark --motion restless --bpm auto demo.wav cover.jpg
 
-# Every image shown in a different color
+# Every image shown a little lighter or darker
 nltl-animate --motion shifting --bpm 138 demo.wav cover.jpg
 
 # A photograph that should not move at all
@@ -63,7 +63,7 @@ nltl-animate --grade clean --motion still demo.wav photo.jpg
 nltl-animate --config nltl.yaml --grade my-grade --bpm 138 demo.wav cover.jpg
 ```
 
-Output files are saved alongside the audio file (or the first image with `--no-audio`, or in `--output-dir`). Each name gives the layout, whether the clip has audio, and the time of the render, so repeated renders never replace each other:
+Output files are saved in `--output-dir`, or else in `$NLTL_ANIMATE_OUTPUT_DIR` if it is set, or else alongside the audio file (or the first image with `--no-audio`). The directory must already exist; a leading `~` is expanded even when the shell left it quoted, and a missing or read-only directory is reported (with where the path came from) before anything renders. Each name gives the layout, whether the clip has audio, and the time of the render, so repeated renders never replace each other:
 
 ```
 nltl_animate_single_audio_20261117-215301.mp4
@@ -73,15 +73,31 @@ nltl_animate_grid3_mixed_loop_noaudio_20261117-215301.mp4   # grid --tiles mixed
 
 If the file already exists (two renders in the same second), you are asked before it is replaced. Without a terminal to ask on, the render stops instead, unless you pass `--overwrite`.
 
+### Interactive mode
+
+Run `nltl-animate` with no arguments in a folder with your audio and images, and a form asks for everything: layout, audio (or a silent loop), images, grid settings, grade, motion and BPM. Flags you pass (such as `--grade` or `--config`) fill in the starting values, and custom grades and motions from `--config` are listed alongside the built-ins. As you move through the grade and motion lists, the dial values of the highlighted one are shown below the list.
+
+The last page asks for the output directory, pre-filled from `--output-dir` or `$NLTL_ANIMATE_OUTPUT_DIR` (blank saves next to the input; a directory that doesn't exist is caught right there), and whether to preview first.
+
+With a preview, a short low-quality render is saved as `nltl_animate_preview.mp4` in the output directory and opens in your default player. Then you choose:
+
+- **Render the full clip**: the preview is deleted and the full clip renders with the same settings.
+- **Change grade or motion**: just that page again, then a new preview.
+- **Same settings, new seed**: a new image order and new shades (offered only when the clip has several images or a shade).
+- **Change something else**: the whole form again, with your current choices filled in.
+- **Quit**: the preview is kept.
+
+Each preview replaces the last one, including one left over from an earlier run, without asking. After each render the equivalent command is printed, so you can run it again without the form.
+
 ### Silent loops (`--no-audio`)
 
 With `--no-audio` there is no audio file: every argument is an image, and the output is a silent clip that loops seamlessly when played on repeat. It works with every layout, saved next to the first image.
 
 - **Several images (single, grid):** the clip is one pass through the images. They are shuffled once (by `--seed`) and each is shown once, for `--hold`/`--hold-beats`, so playing it on repeat shows the same sequence over and over, with the loop point falling exactly on an image switch. With `--tiles mixed` there is one step per image, and every tile also changes image at the loop point.
-- **One image (single, grid):** 3 seconds, long enough for the motion's breath and shake to read as movement. With a tint, it is rounded up to whole switches.
+- **One image (single, grid):** 3 seconds, long enough for the motion's breath and shake to read as movement. With a shade, it is rounded up to whole switches.
 - **train:** as long as it takes one car per image to pass (at least 3 seconds with one image). The speed is nudged slightly so that is a whole number of frames, and the last frame leads straight back into the first.
 
-Tints repeat with the loop, so no tile or car changes color at the loop point. The motion's breath, shake and pulse are not matched up at the loop point; they are jumpy anyway. `--bpm <number>` still sets the tempo of the motion and switching; `--bpm auto` needs audio. `--preview` stops at 10 seconds, which cuts long loops short.
+Shades repeat with the loop, so no tile or car changes brightness at the loop point. The motion's breath, shake and pulse are not matched up at the loop point; they are jumpy anyway. `--bpm <number>` still sets the tempo of the motion and switching; `--bpm auto` needs audio. `--preview` stops at 10 seconds, which cuts long loops short.
 
 ```bash
 nltl-animate --no-audio cover.jpg                                    # 3s loop
@@ -162,7 +178,7 @@ nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # a, b, c, a, b, 
 | `--bpm` | `0` | Track BPM for the motion and image switching, or `auto` to detect it (0 = assume 120) |
 | `--preview` | `false` | Render 10s at low quality to check the look |
 | `--no-audio` | `false` | No audio file: arguments are all images, output is a silent seamless loop |
-| `--output-dir`, `-o` | same as audio (or first image) | Where to write the output file |
+| `--output-dir`, `-o` | `$NLTL_ANIMATE_OUTPUT_DIR`, else same as audio (or first image) | Where to write the output file |
 | `--overwrite` | `false` | Replace an existing output file without asking |
 | `--verbose`, `-v` | `false` | Show ffmpeg's output while rendering |
 | `--config`, `-c` | — | YAML file with custom grades and motions |
@@ -185,6 +201,12 @@ A grade is the fixed color and texture of the picture. Nothing in it follows the
 | `clean` | +5 | 0 | 3 | 20 | 8 | Full color, light vignette, a trace of grain |
 | `muted` | +15 | -30 | 6 | 33 | 25 | Pulled-back color, visible grain, medium vignette (default) |
 | `dark` | +30 | -60 | 8 | 50 | 40 | Little color, hard contrast, heavy grain and vignette |
+| `vivid` | +20 | +45 | 0 | 15 | 5 | Boosted color, crisp and clean |
+| `faded` | -30 | -20 | 5 | 10 | 15 | Flat, washed-out color, like an old print |
+| `dream` | -10 | +10 | 40 | 40 | 10 | Hazy and smeared, soft dark corners |
+| `mono` | +25 | -100 | 4 | 45 | 30 | Black and white, punchy, with grain |
+| `grit` | +20 | -20 | 0 | 30 | 80 | Sharp, with very heavy grain |
+| `tunnel` | +10 | -10 | 5 | 90 | 20 | A spotlight: everything near the edges falls to black |
 
 ## Motions
 
@@ -197,19 +219,22 @@ A motion is everything that moves in time with the beat. Strengths are percentag
 | `shake` | 0 to 10 | how far the frame drifts and jitters, % (at a fixed rate, every 2 beats) |
 | `pulse` | 0 to 100 | how much the brightness swells, % |
 | `pulse_beats` | > 0 | beats per pulse |
-| `tint` | 0 to 50 | how far each image shown leans toward its own color, % |
+| `shade` | 0 to 50 | how much lighter or darker each image shown can be, % |
 
-| Motion | breath | breath_beats | shake | pulse | pulse_beats | tint | |
+| Motion | breath | breath_beats | shake | pulse | pulse_beats | shade | |
 |--------|-------:|-------------:|------:|------:|------------:|-----:|---|
 | `still` | 0 | — | 0 | 0 | — | 0 | No movement at all (suggested for photographs) |
 | `gentle` | 0.5 | 16 | 0.1 | 1 | 8 | 0 | Slow, barely-there drift |
 | `steady` | 1 | 8 | 0.2 | 2 | 4 | 0 | Noticeable breathing that keeps time (default) |
 | `restless` | 1.5 | 4 | 0.3 | 4 | 2 | 0 | Fast, deep breathing and a strong pulse |
-| `shifting` | 1 | 8 | 0.2 | 2 | 4 | 10 | Steady, with every image in a different color |
+| `drift` | 4 | 32 | 0 | 0 | — | 0 | A deep, very slow zoom and nothing else |
+| `nervous` | 0.5 | 8 | 1.5 | 1 | 4 | 0 | A strong shake over light breathing |
+| `pound` | 1 | 2 | 0.2 | 12 | 1 | 0 | A hard pulse on every beat |
+| `shifting` | 1 | 8 | 0.2 | 2 | 4 | 15 | Steady, with every image a little lighter or darker |
 
-### Tint
+### Shade
 
-With a tint, every image shown gets its own color cast: each switch in single, each tile at each switch in grid (even with `--tiles same` or a single image), and each car of the train for its whole trip. The color changes but the brightness doesn't, and each new cast leans a long way around the color wheel from the last, so neighbors always clearly differ. At `tint: 10`, red, green and blue each move by at most 10%. A single image with a tint switches like several images do, every beat with `--bpm` or as set by `--hold`/`--hold-beats`. The colors follow `--seed`. The grade is applied afterward, so a low-saturation grade like `dark` mutes the tint too.
+With a shade, every image shown is a little lighter or darker than the original, picked at random: each switch in single, each tile at each switch in grid (even with `--tiles same` or a single image), and each car of the train for its whole trip. The image's colors don't change, only its brightness, and it stays that way while the image is on screen. At `shade: 15`, each image is somewhere between 15% darker and 15% lighter. A single image with a shade switches like several images do, every beat with `--bpm` or as set by `--hold`/`--hold-beats`. The shades follow `--seed`.
 
 The frame is always zoomed in just enough that the breath and shake never show the image's edges.
 

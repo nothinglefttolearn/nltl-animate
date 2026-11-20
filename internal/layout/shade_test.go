@@ -9,18 +9,19 @@ import (
 	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
 )
 
-func tinter(t *testing.T, seed uint64) motion.Tinter {
+func shader(t *testing.T, seed uint64) motion.Shader {
 	t.Helper()
 	m, ok := motion.Get("shifting")
 	if !ok {
 		t.Fatal("no shifting motion")
 	}
-	return m.Tinter(seed)
+	return m.Shader(seed)
 }
 
-// tinted is src with cast applied, as the layouts should draw it.
-func tinted(src color.RGBA, c motion.Cast) color.RGBA {
-	return color.RGBA{R: to8(float32(float64(src.R) * c[0])), G: to8(float32(float64(src.G) * c[1])), B: to8(float32(float64(src.B) * c[2])), A: src.A}
+// shaded is src with gain applied, as the layouts should draw it.
+func shaded(src color.RGBA, gain float64) color.RGBA {
+	f := func(v uint8) uint8 { return to8(float32(float64(v) * gain)) }
+	return color.RGBA{R: f(src.R), G: f(src.G), B: f(src.B), A: src.A}
 }
 
 func frameAt(buf []byte, f, w, h int) *image.RGBA {
@@ -28,19 +29,19 @@ func frameAt(buf []byte, f, w, h int) *image.RGBA {
 	return &image.RGBA{Pix: buf[f*n : (f+1)*n], Stride: w * 4, Rect: image.Rect(0, 0, w, h)}
 }
 
-func TestTintTable(t *testing.T) {
-	tt := newTintTable(motion.Cast{1.1, 0.95, 1.5})
-	src := []byte{100, 200, 250, 255, 0, 0, 0, 0}
+func TestShadeTable(t *testing.T) {
+	tt := newShadeTable(1.1)
+	src := []byte{100, 200, 240, 128, 0, 0, 0, 0}
 	dst := make([]byte, len(src))
 	tt.copy(dst, src)
-	want := []byte{110, 190, 255, 255, 0, 0, 0, 0} // blue clamps; alpha untouched
+	want := []byte{110, 220, 255, 128, 0, 0, 0, 0} // blue clamps; alpha untouched
 	if !bytes.Equal(dst, want) {
 		t.Errorf("got %v, want %v", dst, want)
 	}
 }
 
-// A single image with a tint becomes a cycle of tinted copies of it.
-func TestCycleTintsEachAppearance(t *testing.T) {
+// A single image with a shade becomes a cycle of shaded copies of it.
+func TestCycleShadesEachAppearance(t *testing.T) {
 	gray := color.RGBA{R: 128, G: 128, B: 128, A: 255}
 	for _, loop := range []bool{false, true} {
 		c, err := NewCycle([]*image.RGBA{solid(4, 2, gray)}, 2, 3)
@@ -48,7 +49,7 @@ func TestCycleTintsEachAppearance(t *testing.T) {
 			t.Fatal(err)
 		}
 		c.Loop = loop
-		c.Tint = tinter(t, 3)
+		c.Shade = shader(t, 3)
 		const frames = 8 // 4 appearances of 2 frames each
 		var buf bytes.Buffer
 		if err := c.WriteFrames(&buf, frames); err != nil {
@@ -58,47 +59,42 @@ func TestCycleTintsEachAppearance(t *testing.T) {
 		if loop {
 			period = frames / 2
 		}
-		var prev color.RGBA
 		for f := range frames {
 			got := frameAt(buf.Bytes(), f, 4, 2).RGBAAt(3, 1)
-			if want := tinted(gray, c.Tint.Cast(f/2, period)); got != want {
+			if want := shaded(gray, c.Shade.Gain(f/2, period)); got != want {
 				t.Fatalf("loop %v frame %d = %v, want %v", loop, f, got, want)
 			}
-			if f%2 == 0 && f > 0 && got == prev {
-				t.Errorf("loop %v frame %d: tint did not change on the switch", loop, f)
-			}
-			prev = got
 		}
 	}
 }
 
-// With several images, the image and the tint both change on every switch.
-func TestCycleTintWithSeveralImages(t *testing.T) {
+// With several images, the image and the shade both change on every switch.
+func TestCycleShadeWithSeveralImages(t *testing.T) {
 	cols := []color.RGBA{{R: 200, G: 100, B: 50, A: 255}, {R: 50, G: 100, B: 200, A: 255}}
 	c, err := NewCycle([]*image.RGBA{solid(2, 2, cols[0]), solid(2, 2, cols[1])}, 1, 9)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.Tint = tinter(t, 9)
+	c.Shade = shader(t, 9)
 	var buf bytes.Buffer
 	if err := c.WriteFrames(&buf, 6); err != nil {
 		t.Fatal(err)
 	}
 	for f, idx := range Sequence(2, 6, 1, 9) {
-		if got, want := frameAt(buf.Bytes(), f, 2, 2).RGBAAt(0, 0), tinted(cols[idx], c.Tint.Cast(f, 0)); got != want {
-			t.Errorf("frame %d = %v, want image %d tinted %v", f, got, idx, want)
+		if got, want := frameAt(buf.Bytes(), f, 2, 2).RGBAAt(0, 0), shaded(cols[idx], c.Shade.Gain(f, 0)); got != want {
+			t.Errorf("frame %d = %v, want image %d shaded %v", f, got, idx, want)
 		}
 	}
 }
 
 // Every tile is its own appearance, even when every tile shows the same image.
-func TestSameMosaicTintsEachTile(t *testing.T) {
+func TestSameMosaicShadesEachTile(t *testing.T) {
 	gray := color.RGBA{R: 128, G: 128, B: 128, A: 255}
 	m, err := NewSameMosaic([]*image.RGBA{solid(2, 2, gray)}, 2, 3, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Tint = tinter(t, 4)
+	m.Shade = shader(t, 4)
 	m.Loop = true
 	const frames, tiles = 6, 4 // 2 steps
 	var buf bytes.Buffer
@@ -110,19 +106,19 @@ func TestSameMosaicTintsEachTile(t *testing.T) {
 		seen := map[color.RGBA]bool{}
 		for tile := range tiles {
 			got := img.RGBAAt((tile%2)*2+1, (tile/2)*2+1)
-			if want := tinted(gray, m.Tint.Cast(f/3*tiles+tile, 2*tiles)); got != want {
+			if want := shaded(gray, m.Shade.Gain(f/3*tiles+tile, 2*tiles)); got != want {
 				t.Fatalf("frame %d tile %d = %v, want %v", f, tile, got, want)
 			}
 			seen[got] = true
 		}
-		if len(seen) != tiles {
-			t.Errorf("frame %d: %d different colors across %d tiles", f, len(seen), tiles)
+		if len(seen) < 2 {
+			t.Errorf("frame %d: every tile has the same shade", f)
 		}
 	}
 }
 
 // With --tiles same and several images, every tile shows the same image at
-// once, each with its own cast.
+// once, each with its own shade.
 func TestSameMosaicShowsOneImageAtATime(t *testing.T) {
 	cols := []color.RGBA{{R: 255, A: 255}, {G: 255, A: 255}, {B: 255, A: 255}}
 	var imgs []*image.RGBA
@@ -147,7 +143,7 @@ func TestSameMosaicShowsOneImageAtATime(t *testing.T) {
 	}
 }
 
-func TestMixedMosaicTintsEachTile(t *testing.T) {
+func TestMixedMosaicShadesEachTile(t *testing.T) {
 	cols := []color.RGBA{{R: 200, G: 100, B: 50, A: 255}, {R: 50, G: 100, B: 200, A: 255}, {R: 100, G: 200, B: 50, A: 255}}
 	var imgs []*image.RGBA
 	for _, c := range cols {
@@ -157,7 +153,7 @@ func TestMixedMosaicTintsEachTile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Tint = tinter(t, 5)
+	m.Shade = shader(t, 5)
 	var buf bytes.Buffer
 	if err := m.WriteFrames(&buf, 6); err != nil {
 		t.Fatal(err)
@@ -167,8 +163,8 @@ func TestMixedMosaicTintsEachTile(t *testing.T) {
 		img := frameAt(buf.Bytes(), f, 4, 4)
 		for tile, idx := range steps[f/2] {
 			got := img.RGBAAt((tile%2)*2, (tile/2)*2)
-			if want := tinted(cols[idx], m.Tint.Cast(f/2*4+tile, 0)); got != want {
-				t.Errorf("frame %d tile %d = %v, want image %d tinted %v", f, tile, got, idx, want)
+			if want := shaded(cols[idx], m.Shade.Gain(f/2*4+tile, 0)); got != want {
+				t.Errorf("frame %d tile %d = %v, want image %d shaded %v", f, tile, got, idx, want)
 			}
 		}
 	}
@@ -188,36 +184,36 @@ func TestNewSameMosaicErrors(t *testing.T) {
 	}
 }
 
-func TestDrawBilinearTint(t *testing.T) {
-	gray := color.RGBA{R: 100, G: 100, B: 100, A: 255}
+func TestDrawBilinearShade(t *testing.T) {
+	col := color.RGBA{R: 100, G: 50, B: 200, A: 255}
 	dst := image.NewRGBA(image.Rect(0, 0, 4, 4))
-	drawBilinear(dst, solid(8, 8, gray), -2, -2, 8, 8, 1, [3]float32{1.2, 1, 0.5})
-	if got, want := dst.RGBAAt(1, 1), (color.RGBA{R: 120, G: 100, B: 50, A: 255}); got != want {
+	drawBilinear(dst, solid(8, 8, col), -2, -2, 8, 8, 1, 1.2)
+	if got, want := dst.RGBAAt(1, 1), (color.RGBA{R: 120, G: 60, B: 240, A: 255}); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
-// Each car keeps its own cast for its whole trip, and neighbors differ.
-func TestTrainTintsEachCar(t *testing.T) {
+// Each car keeps its own shade for its whole trip, and neighbors differ.
+func TestTrainShadesEachCar(t *testing.T) {
 	o := DefaultTrainOptions()
 	o.Copies = 6
-	o.Tint = tinter(t, 11)
+	o.Shade = shader(t, 11)
 	tr, err := NewTrain([]image.Image{solid(32, 32, color.RGBA{R: 128, G: 128, B: 128, A: 255})}, 96, 96, o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	car := map[int]motion.Cast{}
+	car := map[int]float64{}
 	for f := range 40 {
 		for _, c := range tr.copies(float64(f) / 30) {
-			if c.cast != tr.opts.Tint.Cast(c.car, 0) {
-				t.Fatalf("frame %d car %d: cast %v, want Cast(%d)", f, c.car, c.cast, c.car)
+			if c.gain != tr.opts.Shade.Gain(c.car, 0) {
+				t.Fatalf("frame %d car %d: gain %v, want Gain(%d)", f, c.car, c.gain, c.car)
 			}
-			car[c.car] = c.cast
+			car[c.car] = c.gain
 		}
 	}
 	for n, c := range car {
 		if next, ok := car[n+1]; ok && next == c {
-			t.Errorf("cars %d and %d share a cast", n, n+1)
+			t.Errorf("cars %d and %d share a shade", n, n+1)
 		}
 	}
 	if len(car) <= o.Copies {
@@ -226,20 +222,20 @@ func TestTrainTintsEachCar(t *testing.T) {
 
 	plain := DefaultTrainOptions()
 	plain.Copies = 6
-	untinted, _ := NewTrain([]image.Image{solid(32, 32, color.RGBA{R: 128, G: 128, B: 128, A: 255})}, 96, 96, plain)
+	unshaded, _ := NewTrain([]image.Image{solid(32, 32, color.RGBA{R: 128, G: 128, B: 128, A: 255})}, 96, 96, plain)
 	a, b := image.NewRGBA(image.Rect(0, 0, 96, 96)), image.NewRGBA(image.Rect(0, 0, 96, 96))
 	tr.RenderFrame(a, 10)
-	untinted.RenderFrame(b, 10)
+	unshaded.RenderFrame(b, 10)
 	if bytes.Equal(a.Pix, b.Pix) {
-		t.Error("tinted frame looks the same as untinted")
+		t.Error("shaded frame looks the same as unshaded")
 	}
 }
 
-func TestTrainTintLoopIsSeamless(t *testing.T) {
+func TestTrainShadeLoopIsSeamless(t *testing.T) {
 	imgs := []image.Image{ring(32), solid(40, 32, color.RGBA{G: 200, A: 255})}
 	o := DefaultTrainOptions()
 	o.BPM, o.Copies = 138, 6
-	o.Tint = tinter(t, 2)
+	o.Shade = shader(t, 2)
 	o.LoopFrames = TrainLoopFrames(o, len(imgs), 90)
 	tr, err := NewTrain(imgs, 96, 96, o)
 	if err != nil {

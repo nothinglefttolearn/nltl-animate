@@ -24,7 +24,7 @@ type Config struct {
 // errPresets explains the format change to anyone with an old config.
 var errPresets = errors.New(`"presets" is no longer supported: a preset is now split into a grade ` +
 	`(contrast, saturation, softness, vignette, grain) under "grades:" and a motion ` +
-	`(breath, breath_beats, shake, pulse, pulse_beats, tint) under "motions:" — see nltl.yaml.example`)
+	`(breath, breath_beats, shake, pulse, pulse_beats, shade) under "motions:" — see nltl.yaml.example`)
 
 // The on-disk shape of each entry. They exist so the strict decoding pass
 // knows `extends` is a valid key alongside the dials.

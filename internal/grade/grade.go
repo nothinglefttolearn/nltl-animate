@@ -38,6 +38,30 @@ var BuiltIn = map[string]Grade{
 		Name: "dark", Description: "Little color, hard contrast, heavy grain and vignette",
 		Contrast: 30, Saturation: -60, Softness: 8, Vignette: 50, Grain: 40,
 	},
+	"vivid": {
+		Name: "vivid", Description: "Boosted color, crisp and clean",
+		Contrast: 20, Saturation: 45, Softness: 0, Vignette: 15, Grain: 5,
+	},
+	"faded": {
+		Name: "faded", Description: "Flat, washed-out color, like an old print",
+		Contrast: -30, Saturation: -20, Softness: 5, Vignette: 10, Grain: 15,
+	},
+	"dream": {
+		Name: "dream", Description: "Hazy and smeared, soft dark corners",
+		Contrast: -10, Saturation: 10, Softness: 40, Vignette: 40, Grain: 10,
+	},
+	"mono": {
+		Name: "mono", Description: "Black and white, punchy, with grain",
+		Contrast: 25, Saturation: -100, Softness: 4, Vignette: 45, Grain: 30,
+	},
+	"grit": {
+		Name: "grit", Description: "Sharp, with very heavy grain",
+		Contrast: 20, Saturation: -20, Softness: 0, Vignette: 30, Grain: 80,
+	},
+	"tunnel": {
+		Name: "tunnel", Description: "A spotlight: everything near the edges falls to black",
+		Contrast: 10, Saturation: -10, Softness: 5, Vignette: 90, Grain: 20,
+	},
 }
 
 func Get(name string) (Grade, bool) {
