@@ -20,7 +20,7 @@ func addRenderFlags(cmd *cobra.Command, o *renderOptions) {
 		"how the picture looks: "+strings.Join(grade.Names(), ", ")+", or custom from --config")
 	f.StringVar(&o.MotionName, "motion", o.MotionName,
 		"how the picture moves with the beat: "+strings.Join(motion.Names(), ", ")+", or custom from --config")
-	f.Var(bpmFlag{o}, "bpm", `track BPM for the motion and image switching, or "auto" to detect it (0 = assume 120)`)
+	f.Var(bpmFlag{o}, "bpm", `track BPM for the motion and image switching, or "auto" (default: detected from the audio; 120 with --no-audio)`)
 	f.BoolVar(&o.Preview, "preview", o.Preview, "render a short low-quality preview")
 	f.BoolVar(&o.NoAudio, "no-audio", o.NoAudio,
 		"no audio file: every argument is an image, and the silent clip loops seamlessly")
@@ -109,8 +109,8 @@ func layoutCmd(l layoutName, use, short, long string, extra func(*cobra.Command,
 // images, or shades, over time (single and grid).
 func addSwitchFlags(cmd *cobra.Command, o *renderOptions) {
 	f := cmd.Flags()
-	f.IntVar(&o.Hold, "hold", o.Hold, "with several images or a shade: frames to show each image for (default: 1 beat with --bpm, else 15)")
-	f.Float64Var(&o.HoldBeats, "hold-beats", o.HoldBeats, "with several images or a shade: beats to show each image for (needs --bpm)")
+	f.IntVar(&o.Hold, "hold", o.Hold, "with several images or a shade: frames to show each image for (default: 1 beat, or 15 in a silent loop without --bpm)")
+	f.Float64Var(&o.HoldBeats, "hold-beats", o.HoldBeats, "with several images or a shade: beats to show each image for (needs --bpm with --no-audio)")
 }
 
 func gridCmd() *cobra.Command {
@@ -158,8 +158,8 @@ Give several images and the cars cycle through them in order, so a different
 image passes at every step. Images keep their own shapes; their inner edges
 line up along the track.
 
-With --bpm, one copy passes every --beats beats; otherwise --speed copies
-pass per second. --vanish moves the vanishing point to the right to fill more
+One copy passes every --beats beats (at the detected tempo unless --bpm is
+given); a silent loop without --bpm passes --speed copies per second instead. --vanish moves the vanishing point to the right to fill more
 of the frame. The motion and grade are applied over the result; a motion
 with a shade (e.g. --motion shifting) makes every car a little lighter or
 darker.
@@ -171,8 +171,8 @@ nudged slightly so the loop is a whole number of frames.`,
 			f := cmd.Flags()
 			f.IntVar(&o.Train.Copies, "copies", d.Copies, "copies on the track at once")
 			f.Float64Var(&o.Train.Spacing, "spacing", d.Spacing, "depth gap between copies, in copy heights")
-			f.Float64Var(&o.Train.Speed, "speed", d.Speed, "copies passing per second (without --bpm)")
-			f.Float64Var(&o.Train.Beats, "beats", d.Beats, "beats per passing copy (with --bpm)")
+			f.Float64Var(&o.Train.Speed, "speed", d.Speed, "copies passing per second (--no-audio without --bpm)")
+			f.Float64Var(&o.Train.Beats, "beats", d.Beats, "beats per passing copy (with audio or --bpm)")
 			f.Float64Var(&o.Train.Offset, "offset", d.Offset, "gap between the track and the viewer, in widths of the widest image")
 			f.Float64Var(&o.Train.FOV, "fov", d.FOV, "horizontal field of view in degrees")
 			f.Float64Var(&o.Train.Vanish, "vanish", d.Vanish, "vanishing point position across the frame (0.1–1)")

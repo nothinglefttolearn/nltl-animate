@@ -73,17 +73,18 @@ func TestIntegrationRenderEveryLayout(t *testing.T) {
 	half := writePNG(t, dir, "half.png", color.RGBA{G: 128, A: 128}) // translucent
 	blue := writePNG(t, dir, "blue.png", color.RGBA{B: 255, A: 255})
 
+	// The tone has no beat to detect, so every case gives --bpm.
 	tests := []struct {
 		name string
 		args []string
 		out  string // name between nltl_animate_ and the timestamp
 		w, h int
 	}{
-		{"single", []string{audio, red}, "single_audio_preview", 1080, 1080},
-		{"grid", []string{"grid", "--n", "3", audio, red}, "grid3_audio_preview", 1080, 1080},
-		{"several images", []string{"--seed", "1", audio, red, blue}, "cycle_audio_preview", 1080, 1080},
+		{"single", []string{"--bpm", "128", audio, red}, "single_audio_preview", 1080, 1080},
+		{"grid", []string{"grid", "--n", "3", "--bpm", "128", audio, red}, "grid3_audio_preview", 1080, 1080},
+		{"several images", []string{"--seed", "1", "--bpm", "128", audio, red, blue}, "cycle_audio_preview", 1080, 1080},
 		{"grid same", []string{"grid", "--n", "2", "--bpm", "120", audio, red, blue}, "grid2_audio_preview", 1080, 1080},
-		{"grid mixed", []string{"grid", "--n", "3", "--tiles", "mixed", audio, red, blue, half}, "grid3_mixed_audio_preview", 1080, 1080},
+		{"grid mixed", []string{"grid", "--n", "3", "--tiles", "mixed", "--bpm", "128", audio, red, blue, half}, "grid3_mixed_audio_preview", 1080, 1080},
 		{"train", []string{"train", "--bpm", "140", audio, half}, "train_audio_preview", 1080, 1080},
 	}
 	for _, tt := range tests {

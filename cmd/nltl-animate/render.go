@@ -41,8 +41,9 @@ const (
 	tilesMixed = "mixed" // every tile has its own image sequence
 )
 
-// defaultHoldFrames is how long each image shows when several images switch
-// over time and neither --hold, --hold-beats nor --bpm is given (0.5 s).
+// defaultHoldFrames is how long each image shows in a silent loop when
+// several images switch over time and neither --hold, --hold-beats nor --bpm
+// is given (0.5 s). With audio the BPM is always known (detected if not given).
 const defaultHoldFrames = 15
 
 // oneImageLoopSeconds is how long a silent loop of a single image lasts:
@@ -59,7 +60,7 @@ type renderOptions struct {
 	ImagePaths []string // one or more
 	GradeName  string
 	MotionName string
-	BPM        int
+	BPM        int  // 0 = detect it from the audio (120 with NoAudio)
 	AutoBPM    bool // detect BPM from the audio; BPM is filled in by renderClip
 	Preview    bool
 	Verbose    bool
@@ -156,10 +157,14 @@ func customHint(custom int) string {
 }
 
 // validate checks the options that do not need any files. It fills
-// Train.BPM and Train.BG as a side effect.
+// Train.BPM and Train.BG as a side effect, and turns on AutoBPM when there is
+// audio but no BPM: the tempo is never assumed for a track.
 func (o *renderOptions) validate() error {
 	if o.BPM < 0 {
-		return fmt.Errorf("--bpm must be positive (or 0 for time-based animation), got %d", o.BPM)
+		return fmt.Errorf("--bpm must be positive, got %d", o.BPM)
+	}
+	if o.BPM == 0 && !o.NoAudio {
+		o.AutoBPM = true
 	}
 	if o.NoAudio && o.AutoBPM {
 		return errors.New("--bpm auto needs an audio track — pass --bpm <number> with --no-audio")
@@ -175,7 +180,7 @@ func (o *renderOptions) validate() error {
 		return fmt.Errorf("--hold-beats must be positive, got %g", o.HoldBeats)
 	}
 	if o.HoldBeats > 0 && o.BPM == 0 && !o.AutoBPM {
-		return errors.New("--hold-beats needs --bpm")
+		return errors.New("--hold-beats needs --bpm with --no-audio")
 	}
 	if o.HoldBeats > 0 && o.Hold > 0 {
 		return errors.New("use either --hold or --hold-beats, not both")
@@ -232,7 +237,8 @@ func (o *renderOptions) seeded() bool {
 }
 
 // holdFrames is how many frames each image shows: --hold-beats, then
-// --hold, then one beat when the BPM is known, else defaultHoldFrames.
+// --hold, then one beat when the BPM is known (always with audio), else
+// defaultHoldFrames.
 func (o *renderOptions) holdFrames() int {
 	switch {
 	case o.HoldBeats > 0:
@@ -662,7 +668,7 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	if o.BPM > 0 {
 		bpm := strconv.Itoa(o.BPM)
 		if o.AutoBPM {
-			bpm += labelStyle.Render(" (detected — pass --bpm to override)")
+			bpm += labelStyle.Render(" (detected — pass --bpm <number> to override)")
 		}
 		fmt.Println(label("BPM") + valueStyle.Render(bpm))
 	}

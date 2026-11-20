@@ -32,7 +32,7 @@ Every layout takes one or more images, and every layout gets the grade and the m
 
 ### Switching between images (single and grid)
 
-With several images, the clip jumps to a random image (never the same one twice in a row) every beat with `--bpm`, or every half second without. Change the rate with `--hold` (frames) or `--hold-beats` (beats, needs `--bpm`):
+With several images, the clip jumps to a random image (never the same one twice in a row) every beat. Change the rate with `--hold` (frames) or `--hold-beats` (beats):
 
 ```bash
 nltl-animate --bpm 140 demo.wav frames/*.png                       # new image every beat
@@ -85,7 +85,7 @@ nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # a, b, c, a, b, 
 The scene is shaped by:
 
 - how many copies are on the track (`--copies`) and how far apart they are (`--spacing`, in copy heights);
-- how fast they pass: copies per second (`--speed`) without `--bpm`, or beats per copy (`--beats`) with it;
+- how fast they pass: beats per copy (`--beats`), or copies per second (`--speed`) in a silent loop without `--bpm`;
 - where the track vanishes across the frame (`--vanish`; `0.6`–`0.75` fills more of it), how far it runs from you (`--offset`, in widths of the widest image) and how strong the perspective is (`--fov`);
 - how much distant copies fade (`--fog`) into the background color (`--bg`).
 
@@ -121,7 +121,7 @@ The animated examples in these docs use `vivid`: film grain changes on every fra
 
 ## Motions
 
-A motion is everything that moves in time with the beat. Strengths are percentages of the frame; rates are in beats. Without `--bpm` the beats run at 120 BPM.
+A motion is everything that moves in time with the beat. Strengths are percentages of the frame; rates are in beats. The beats run at the track's tempo: `--bpm`, or detected from the audio without it (see [Tempo](#tempo)).
 
 | Dial | Range | Meaning |
 |------|-------|---------|
@@ -188,10 +188,10 @@ The config is checked when it's loaded. Unknown keys (typos), values out of rang
 
 ## Tempo
 
-`--bpm auto` detects the tempo from the audio (the first 5 minutes) and prints it in the summary and in the "run this again" command, so you can pin it once you know it. In the interactive form, type `auto` in the BPM field.
+Without `--bpm` (or with `--bpm auto`), the tempo is detected from the audio (the first 5 minutes) and printed in the summary and in the "run this again" command, so you can pin it once you know it. The tool never assumes a tempo for a track. In the interactive form, leave the BPM field blank (or type `auto`).
 
 ```bash
-nltl-animate train --bpm auto demo.wav logo.png
+nltl-animate train demo.wav logo.png
 ```
 
 Detection is built in (no extra tools beyond ffmpeg) and gives a whole-number BPM, which suits tracks made at a fixed tempo. It is most reliable on music with a steady kick. Like any tempo detector, it can land on half or double the tempo you'd count (e.g. 87 for drum & bass at 174). The visuals still hit the beat then, just at half or twice the rate. Pass `--bpm 174` to override. Tracks with no clear beat give an error rather than a guess.
@@ -204,7 +204,7 @@ With `--no-audio` there is no audio file: every argument is an image, and the ou
 - **One image (single, grid):** 3 seconds, long enough for the motion's breath and shake to read as movement. With a shade, it is rounded up to whole switches.
 - **train:** as long as it takes one car per image to pass (at least 3 seconds with one image). The speed is nudged slightly so that is a whole number of frames, and the last frame leads straight back into the first.
 
-Shades repeat with the loop, so no tile or car changes brightness at the loop point. The motion's breath, shake and pulse are not matched up at the loop point; they are jumpy anyway. `--bpm <number>` still sets the tempo of the motion and switching; `--bpm auto` needs audio. `--preview` stops at 10 seconds, which cuts long loops short.
+Shades repeat with the loop, so no tile or car changes brightness at the loop point. The motion's breath, shake and pulse are not matched up at the loop point; they are jumpy anyway. With no audio there is nothing to detect a tempo from: `--bpm <number>` sets the tempo of the motion and switching, and without it the motion runs at 120 BPM and images switch every half second. `--bpm auto` needs audio. `--preview` stops at 10 seconds, which cuts long loops short.
 
 ```bash
 nltl-animate --no-audio cover.jpg                                    # 3s loop
