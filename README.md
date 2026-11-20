@@ -63,7 +63,7 @@ nltl-animate --grade clean --motion still demo.wav photo.jpg
 nltl-animate --config nltl.yaml --grade my-grade --bpm 138 demo.wav cover.jpg
 ```
 
-Output files are saved alongside the audio file (or the first image with `--no-audio`, or in `--output-dir`). Each name gives the layout, whether the clip has audio, and the time of the render, so repeated renders never replace each other:
+Output files are saved in `--output-dir`, or else in `$NLTL_ANIMATE_OUTPUT_DIR` if it is set, or else alongside the audio file (or the first image with `--no-audio`). The directory must already exist; a leading `~` is expanded even when the shell left it quoted, and a missing or read-only directory is reported (with where the path came from) before anything renders. Each name gives the layout, whether the clip has audio, and the time of the render, so repeated renders never replace each other:
 
 ```
 nltl_animate_single_audio_20261117-215301.mp4
@@ -162,7 +162,7 @@ nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # a, b, c, a, b, 
 | `--bpm` | `0` | Track BPM for the motion and image switching, or `auto` to detect it (0 = assume 120) |
 | `--preview` | `false` | Render 10s at low quality to check the look |
 | `--no-audio` | `false` | No audio file: arguments are all images, output is a silent seamless loop |
-| `--output-dir`, `-o` | same as audio (or first image) | Where to write the output file |
+| `--output-dir`, `-o` | `$NLTL_ANIMATE_OUTPUT_DIR`, else same as audio (or first image) | Where to write the output file |
 | `--overwrite` | `false` | Replace an existing output file without asking |
 | `--verbose`, `-v` | `false` | Show ffmpeg's output while rendering |
 | `--config`, `-c` | — | YAML file with custom grades and motions |

@@ -10,6 +10,7 @@ import (
 	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
 	"github.com/nothinglefttolearn/nltl-animate/internal/layout"
 	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
+	"github.com/nothinglefttolearn/nltl-animate/internal/outdir"
 )
 
 // addRenderFlags registers the flags every rendering command shares.
@@ -24,7 +25,7 @@ func addRenderFlags(cmd *cobra.Command, o *renderOptions) {
 	f.BoolVar(&o.NoAudio, "no-audio", o.NoAudio,
 		"no audio file: every argument is an image, and the silent clip loops seamlessly")
 	f.BoolVarP(&o.Verbose, "verbose", "v", o.Verbose, "show raw ffmpeg output during render")
-	f.StringVarP(&o.OutputDir, "output-dir", "o", o.OutputDir, "output directory (default: same as audio file, or first image with --no-audio)")
+	f.StringVarP(&o.OutputDir, "output-dir", "o", o.OutputDir, "output directory (default: $"+outdir.EnvVar+" if set, else same as audio file, or first image with --no-audio)")
 	f.BoolVar(&o.Overwrite, "overwrite", o.Overwrite, "replace an existing output file without asking")
 	f.StringVarP(&o.ConfigPath, "config", "c", o.ConfigPath, "YAML config file with custom grades and motions")
 	f.Uint64Var(&o.Seed, "seed", o.Seed, "with several images or a shade: random seed for the image order and shades (0 = new each run)")

@@ -12,7 +12,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nothinglefttolearn/nltl-animate/internal/outdir"
 )
+
+// TestMain keeps the developer's own output directory out of the tests; a
+// test that needs it sets it with t.Setenv.
+func TestMain(m *testing.M) {
+	_ = os.Unsetenv(outdir.EnvVar)
+	os.Exit(m.Run())
+}
 
 func opts(l layoutName, images ...string) renderOptions {
 	o := defaultRenderOptions()
@@ -653,5 +662,68 @@ func TestHeadlessCommandNoAudio(t *testing.T) {
 	o.NoAudio, o.AudioPath, o.Seed = true, "", 5
 	if got, want := o.headlessCommand(), "nltl-animate --grade muted --motion steady --no-audio --seed 5 a.png b.png"; got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestCLIOutputDir(t *testing.T) {
+	dir := t.TempDir()
+	audio := filepath.Join(dir, "song.wav")
+	red := writePNG(t, dir, "red.png", color.RGBA{R: 255, A: 255})
+	envDir, flagDir := t.TempDir(), t.TempDir()
+	out := func(args []string) string { return filepath.Dir(args[len(args)-1]) }
+
+	t.Run("variable", func(t *testing.T) {
+		t.Setenv(outdir.EnvVar, envDir)
+		if got := out(must2(runCLI(t, audio, red))); got != envDir {
+			t.Errorf("output dir = %s, want %s", got, envDir)
+		}
+	})
+	t.Run("flag beats variable", func(t *testing.T) {
+		t.Setenv(outdir.EnvVar, envDir)
+		if got := out(must2(runCLI(t, "-o", flagDir, audio, red))); got != flagDir {
+			t.Errorf("output dir = %s, want %s", got, flagDir)
+		}
+	})
+	t.Run("empty variable is unset", func(t *testing.T) {
+		t.Setenv(outdir.EnvVar, "")
+		if got := out(must2(runCLI(t, audio, red))); got != dir {
+			t.Errorf("output dir = %s, want next to the audio %s", got, dir)
+		}
+	})
+
+	for name, c := range map[string]struct {
+		env  string
+		args []string
+		want string
+	}{
+		"missing from variable": {filepath.Join(dir, "gone"), nil, "does not exist (from " + outdir.EnvVar + ")"},
+		"missing from flag":     {"", []string{"-o", filepath.Join(dir, "gone")}, "does not exist (from --output-dir)"},
+		"file from variable":    {red, nil, "is a file, not a directory (from " + outdir.EnvVar + ")"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			argsFile, _ := fakeFFmpeg(t)
+			t.Setenv(outdir.EnvVar, c.env)
+			cmd := newRootCmd()
+			cmd.SetArgs(append(c.args, audio, red))
+			cmd.SetOut(new(strings.Builder))
+			cmd.SetErr(new(strings.Builder))
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("err = %v, want containing %q", err, c.want)
+			}
+			if _, err := os.Stat(argsFile); err == nil {
+				t.Error("ffmpeg ran despite a bad output directory")
+			}
+		})
+	}
+}
+
+func must2(args []string, _ string) []string { return args }
+
+func TestHeadlessCommandOutputDirFromVariable(t *testing.T) {
+	o := opts(layoutSingle, "a.png")
+	o.OutputDir, o.outputDirFrom = "/videos", outdir.EnvVar
+	if got := o.headlessCommand(); strings.Contains(got, "--output-dir") {
+		t.Errorf("a directory from %s should not become a flag: %s", outdir.EnvVar, got)
 	}
 }

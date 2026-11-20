@@ -20,6 +20,7 @@ import (
 	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
 	"github.com/nothinglefttolearn/nltl-animate/internal/layout"
 	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
+	"github.com/nothinglefttolearn/nltl-animate/internal/outdir"
 	"github.com/nothinglefttolearn/nltl-animate/internal/tempo"
 	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
@@ -62,8 +63,12 @@ type renderOptions struct {
 	AutoBPM    bool // detect BPM from the audio; BPM is filled in by renderClip
 	Preview    bool
 	Verbose    bool
-	OutputDir  string
+	OutputDir  string // --output-dir; renderClip fills it from outdir.EnvVar when empty
 	ConfigPath string
+
+	// outputDirFrom names where OutputDir came from (outdir.FlagSource or
+	// outdir.EnvVar); renderClip fills it in.
+	outputDirFrom string
 
 	// switching between several images, or shades (single and grid)
 	Hold      int     // frames per image; 0 = default (see holdFrames)
@@ -246,6 +251,25 @@ const timestampLayout = "20060102-150405"
 
 // now is the clock for output file names; tests replace it.
 var now = time.Now
+
+// resolveOutputDir picks the output directory from --output-dir or
+// outdir.EnvVar and checks it before anything is rendered. With neither,
+// outputPath writes next to the input.
+func (o *renderOptions) resolveOutputDir() error {
+	dir, from := o.OutputDir, o.outputDirFrom
+	if from == "" {
+		dir, from = outdir.Resolve(o.OutputDir)
+	}
+	if dir == "" {
+		return nil
+	}
+	checked, err := outdir.Check(dir)
+	if err != nil {
+		return fmt.Errorf("%w (from %s)", err, from)
+	}
+	o.OutputDir, o.outputDirFrom = checked, from
+	return nil
+}
 
 // outputPath is nltl_animate_{layout}[_detail]_{audio|loop_noaudio}[_preview]_{timestamp}.mp4
 // next to the audio file, or the first image with --no-audio (or in
@@ -515,7 +539,7 @@ func (o *renderOptions) headlessCommand() string {
 	if o.ConfigPath != "" {
 		parts = append(parts, "--config", o.ConfigPath)
 	}
-	if o.OutputDir != "" {
+	if o.OutputDir != "" && o.outputDirFrom != outdir.EnvVar { // the variable still applies
 		parts = append(parts, "--output-dir", o.OutputDir)
 	}
 
@@ -572,6 +596,9 @@ func detectBPM(audioPath string) (int, error) {
 
 func renderClip(o *renderOptions, cfg *config.Config) error {
 	if err := o.validate(); err != nil {
+		return err
+	}
+	if err := o.resolveOutputDir(); err != nil {
 		return err
 	}
 	outPath := o.outputPath(now())

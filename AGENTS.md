@@ -42,7 +42,7 @@ Every layout takes one or more images. `ffmpeg.Render` has two video input kinds
 
 `--bpm auto` decodes the audio to mono PCM (`ffmpeg.DecodeMono`) and estimates a whole-number tempo in `internal/tempo` (onset envelope → autocorrelation → beat-grid fit).
 
-`internal/frames` decodes and cover-crops images; `internal/video` holds the shared frame rate and preview length.
+`internal/outdir` picks the output directory (`--output-dir`, then `NLTL_ANIMATE_OUTPUT_DIR`) and checks it before rendering. `internal/frames` decodes and cover-crops images; `internal/video` holds the shared frame rate and preview length.
 
 Zero-args invocation drops into `internal/interactive` (a `huh`-based TUI form) instead of requiring flags.
 
