@@ -73,6 +73,22 @@ nltl_animate_grid3_mixed_loop_noaudio_20261117-215301.mp4   # grid --tiles mixed
 
 If the file already exists (two renders in the same second), you are asked before it is replaced. Without a terminal to ask on, the render stops instead, unless you pass `--overwrite`.
 
+### Interactive mode
+
+Run `nltl-animate` with no arguments in a folder with your audio and images, and a form asks for everything: layout, audio (or a silent loop), images, grid settings, grade, motion and BPM. Flags you pass (such as `--grade` or `--config`) fill in the starting values, and custom grades and motions from `--config` are listed alongside the built-ins. As you move through the grade and motion lists, the dial values of the highlighted one are shown below the list.
+
+The last page asks for the output directory, pre-filled from `--output-dir` or `$NLTL_ANIMATE_OUTPUT_DIR` (blank saves next to the input; a directory that doesn't exist is caught right there), and whether to preview first.
+
+With a preview, a short low-quality render is saved as `nltl_animate_preview.mp4` in the output directory and opens in your default player. Then you choose:
+
+- **Render the full clip**: the preview is deleted and the full clip renders with the same settings.
+- **Change grade or motion**: just that page again, then a new preview.
+- **Same settings, new seed**: a new image order and new shades (offered only when the clip has several images or a shade).
+- **Change something else**: the whole form again, with your current choices filled in.
+- **Quit**: the preview is kept.
+
+Each preview replaces the last one, including one left over from an earlier run, without asking. After each render the equivalent command is printed, so you can run it again without the form.
+
 ### Silent loops (`--no-audio`)
 
 With `--no-audio` there is no audio file: every argument is an image, and the output is a silent clip that loops seamlessly when played on repeat. It works with every layout, saved next to the first image.

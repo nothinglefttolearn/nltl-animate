@@ -14,6 +14,7 @@ import (
 	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
 	"github.com/nothinglefttolearn/nltl-animate/internal/layout"
 	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
+	"github.com/nothinglefttolearn/nltl-animate/internal/outdir"
 )
 
 var audioExts = map[string]bool{
@@ -42,6 +43,8 @@ type Choices struct {
 	AutoBPM    bool
 	GridN      int
 	Tiles      string // grid with several images: "same" or "mixed"
+	OutputDir  string // empty: next to the audio file, or the first image
+	Preview    bool   // render a preview first (see AfterPreview)
 }
 
 // Defaults pre-fills the form (typically from command-line flags) and supplies
@@ -55,10 +58,16 @@ type Defaults struct {
 	AutoBPM       bool
 	GridN         int
 	Tiles         string
+	OutputDir     string // from --output-dir or outdir.EnvVar
 	CustomGrades  []grade.Grade
 	CustomMotions []motion.Motion
+
+	// Previous, when set, pre-fills every field with what was picked last
+	// time instead (going back to the form after a preview).
+	Previous *Choices
 }
 
+// Run asks for everything with the whole form.
 func Run(d Defaults) (*Choices, error) {
 	audioFiles, err := scanFiles(audioExts)
 	if err != nil {
@@ -72,20 +81,17 @@ func Run(d Defaults) (*Choices, error) {
 		return nil, errors.New("no image files found in current directory")
 	}
 
-	gradeOpts, gradeNames := namedOptions(d.CustomGrades, grade.Names(), grade.Get,
-		func(g grade.Grade) (string, string) { return g.Name, g.Description })
-	motionOpts, motionNames := namedOptions(d.CustomMotions, motion.Names(), motion.Get,
-		func(m motion.Motion) (string, string) { return m.Name, m.Description })
-
 	var (
 		layoutName = LayoutSingle
 		audioPath  = ""
 		imagePaths []string
 		tiles      = orFirst(d.Tiles, []string{"same", "mixed"})
 		gridStr    = strconv.Itoa(max(1, d.GridN))
-		gradeName  = orFirst(d.GradeName, gradeNames)
-		motionName = orFirst(d.MotionName, motionNames)
+		gradeName  = d.GradeName
+		motionName = d.MotionName
 		bpmStr     = ""
+		outputDir  = d.OutputDir
+		preview    = true
 	)
 	switch {
 	case d.AutoBPM:
@@ -98,6 +104,20 @@ func Run(d Defaults) (*Choices, error) {
 	}
 	if len(audioFiles) > 0 && !d.NoAudio {
 		audioPath = audioFiles[0]
+	}
+	if p := d.Previous; p != nil {
+		layoutName, audioPath, imagePaths = p.Layout, p.AudioPath, p.ImagePaths
+		tiles, gridStr = p.Tiles, strconv.Itoa(p.GridN)
+		gradeName, motionName = p.GradeName, p.MotionName
+		outputDir, preview = p.OutputDir, p.Preview
+		switch {
+		case p.AutoBPM:
+			bpmStr = "auto"
+		case p.BPM > 0:
+			bpmStr = strconv.Itoa(p.BPM)
+		default:
+			bpmStr = ""
+		}
 	}
 	isNot := func(s string) func() bool { return func() bool { return layoutName != s } }
 
@@ -136,18 +156,7 @@ func Run(d Defaults) (*Choices, error) {
 				).
 				Value(&tiles),
 		).WithHideFunc(func() bool { return layoutName != LayoutGrid || len(imagePaths) < 2 }),
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Grade").
-				Description("how the picture looks").
-				Options(gradeOpts...).
-				Value(&gradeName),
-			huh.NewSelect[string]().
-				Title("Motion").
-				Description("how the picture moves with the beat (still: none, suggested for photographs)").
-				Options(motionOpts...).
-				Value(&motionName),
-		),
+		lookGroup(d, &gradeName, &motionName),
 		huh.NewGroup(
 			huh.NewInput().
 				Title("BPM").
@@ -161,12 +170,29 @@ func Run(d Defaults) (*Choices, error) {
 				}).
 				Value(&bpmStr),
 		),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Output directory").
+				PlaceholderFunc(func() string {
+					near := audioPath
+					if near == "" && len(imagePaths) > 0 {
+						near = imagePaths[0]
+					}
+					if near == "" {
+						return "blank: next to the input"
+					}
+					return "blank: next to " + near
+				}, []any{&audioPath, &imagePaths}).
+				Validate(validateOutputDir).
+				Value(&outputDir),
+			huh.NewConfirm().
+				Title("Preview first?").
+				Description("a short low-quality render that opens when it is done, saved as "+PreviewFile).
+				Value(&preview),
+		),
 	)
 
-	if err := form.Run(); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return nil, errors.New("canceled")
-		}
+	if err := runForm(form); err != nil {
 		return nil, err
 	}
 
@@ -186,7 +212,116 @@ func Run(d Defaults) (*Choices, error) {
 		AutoBPM:    autoBPM,
 		GridN:      gridN,
 		Tiles:      tiles,
+		OutputDir:  strings.TrimSpace(outputDir),
+		Preview:    preview,
 	}, nil
+}
+
+// RunLook asks only for the grade and motion, starting from c's, and
+// changes them in c.
+func RunLook(d Defaults, c *Choices) error {
+	gradeName, motionName := c.GradeName, c.MotionName
+	if err := runForm(huh.NewForm(lookGroup(d, &gradeName, &motionName))); err != nil {
+		return err
+	}
+	c.GradeName, c.MotionName = gradeName, motionName
+	return nil
+}
+
+// lookGroup is the form page with the grade and the motion. Below each list
+// it shows the dial values of the highlighted one.
+func lookGroup(d Defaults, gradeName, motionName *string) *huh.Group {
+	gradeOpts, gradeNames, gradeSums := namedOptions(d.CustomGrades, grade.Names(), grade.Get,
+		func(g grade.Grade) (string, string, string) { return g.Name, g.Description, g.Summary() })
+	motionOpts, motionNames, motionSums := namedOptions(d.CustomMotions, motion.Names(), motion.Get,
+		func(m motion.Motion) (string, string, string) { return m.Name, m.Description, m.Summary() })
+	*gradeName = orFirst(*gradeName, gradeNames)
+	*motionName = orFirst(*motionName, motionNames)
+	return huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("Grade").
+			DescriptionFunc(func() string {
+				return "how the picture looks\n" + gradeSums[*gradeName]
+			}, gradeName).
+			Options(gradeOpts...).
+			Value(gradeName),
+		huh.NewSelect[string]().
+			Title("Motion").
+			DescriptionFunc(func() string {
+				return "how the picture moves with the beat (still: none, suggested for photographs)\n" + motionSums[*motionName]
+			}, motionName).
+			Options(motionOpts...).
+			Value(motionName),
+	)
+}
+
+// PreviewFile is the name of the preview rendered in interactive mode, in
+// the output directory. Each preview replaces the last.
+const PreviewFile = "nltl_animate_preview.mp4"
+
+// Next is what to do after a preview.
+type Next int
+
+const (
+	NextFull       Next = iota // render the full clip with the same settings
+	NextLook                   // change the grade or motion, then preview again
+	NextReseed                 // same settings, a new seed, preview again
+	NextEverything             // the whole form again, then preview again
+	NextQuit                   // stop, keeping the preview
+)
+
+// AfterPreview asks what to do once a preview has rendered. reseed offers a
+// new seed, for clips where the seed changes anything. Canceling counts as
+// quitting.
+func AfterPreview(reseed bool) (Next, error) {
+	next := NextFull
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[Next]().
+			Title("Preview done").
+			Options(afterPreviewOptions(reseed)...).
+			Value(&next),
+	))
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return NextQuit, nil
+		}
+		return NextQuit, err
+	}
+	return next, nil
+}
+
+func afterPreviewOptions(reseed bool) []huh.Option[Next] {
+	opts := []huh.Option[Next]{
+		huh.NewOption("Render the full clip", NextFull),
+		huh.NewOption("Change grade or motion", NextLook),
+	}
+	if reseed {
+		opts = append(opts, huh.NewOption("Same settings, new seed (new image order and shades)", NextReseed))
+	}
+	return append(opts,
+		huh.NewOption("Change something else", NextEverything),
+		huh.NewOption("Quit (keep the preview)", NextQuit),
+	)
+}
+
+func runForm(form *huh.Form) error {
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return errors.New("canceled")
+		}
+		return err
+	}
+	return nil
+}
+
+// validateOutputDir accepts blank (next to the input) or a directory that
+// exists and can be written to.
+func validateOutputDir(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	_, err := outdir.Check(strings.TrimSpace(s))
+	return err
 }
 
 // layoutOptions lists the layouts.
@@ -242,34 +377,37 @@ func fileOptions(files []string) []huh.Option[string] {
 
 // namedOptions lists custom grades or motions first, then built-ins not
 // shadowed by a custom one of the same name. It also returns the option
-// values in order.
+// values in order, and each one's dial values by name.
 func namedOptions[T any](custom []T, builtinNames []string, get func(string) (T, bool),
-	describe func(T) (name, description string),
-) ([]huh.Option[string], []string) {
+	describe func(T) (name, description, summary string),
+) ([]huh.Option[string], []string, map[string]string) {
 	var (
 		opts  []huh.Option[string]
 		names []string
+		sums  = make(map[string]string)
 		seen  = make(map[string]bool)
 	)
 	for _, it := range custom {
-		name, desc := describe(it)
+		name, desc, sum := describe(it)
 		if seen[name] {
 			continue
 		}
 		seen[name] = true
 		opts = append(opts, huh.NewOption(fmt.Sprintf("%-14s %s (config)", name, desc), name))
 		names = append(names, name)
+		sums[name] = sum
 	}
 	for _, name := range builtinNames {
 		if seen[name] {
 			continue
 		}
 		it, _ := get(name)
-		_, desc := describe(it)
+		_, desc, sum := describe(it)
 		opts = append(opts, huh.NewOption(fmt.Sprintf("%-14s %s", name, desc), name))
 		names = append(names, name)
+		sums[name] = sum
 	}
-	return opts, names
+	return opts, names, sums
 }
 
 // orFirst returns want if it is one of options, otherwise the first option.

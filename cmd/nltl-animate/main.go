@@ -3,9 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
+	"runtime"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -13,6 +17,7 @@ import (
 	"github.com/nothinglefttolearn/nltl-animate/internal/grade"
 	"github.com/nothinglefttolearn/nltl-animate/internal/interactive"
 	"github.com/nothinglefttolearn/nltl-animate/internal/motion"
+	"github.com/nothinglefttolearn/nltl-animate/internal/outdir"
 )
 
 var (
@@ -99,7 +104,7 @@ form asks for everything.`,
 				opts.setArgs(args)
 				return run(opts)
 			}
-			return runInteractive(opts)
+			return runInteractive(&opts)
 		},
 	}
 	addRenderFlags(root, &opts)
@@ -112,12 +117,14 @@ form asks for everything.`,
 	return root
 }
 
-func runInteractive(opts renderOptions) error {
+func runInteractive(opts *renderOptions) error {
 	cfg, err := loadConfig(opts.ConfigPath)
 	if err != nil {
 		return err
 	}
-	choices, err := interactive.Run(interactive.Defaults{
+	flagDir := opts.OutputDir
+	startDir, _ := outdir.Resolve(flagDir)
+	d := interactive.Defaults{
 		NoAudio:       opts.NoAudio,
 		GradeName:     opts.GradeName,
 		MotionName:    opts.MotionName,
@@ -125,26 +132,130 @@ func runInteractive(opts renderOptions) error {
 		AutoBPM:       opts.AutoBPM,
 		GridN:         opts.GridN,
 		Tiles:         opts.Tiles,
+		OutputDir:     startDir,
 		CustomGrades:  cfg.Grades,
 		CustomMotions: cfg.Motions,
-	})
+	}
+	choices, err := askAll(d)
 	if err != nil {
 		return err
 	}
-	opts.Layout = layoutName(choices.Layout)
-	opts.AudioPath = choices.AudioPath
-	opts.NoAudio = choices.AudioPath == ""
-	opts.ImagePaths = choices.ImagePaths
-	opts.GradeName, opts.MotionName = choices.GradeName, choices.MotionName
-	opts.BPM, opts.AutoBPM = choices.BPM, choices.AutoBPM
-	opts.GridN = choices.GridN
-	opts.Tiles = choices.Tiles
+	apply := func() {
+		opts.Layout = layoutName(choices.Layout)
+		opts.AudioPath = choices.AudioPath
+		opts.NoAudio = choices.AudioPath == ""
+		opts.ImagePaths = choices.ImagePaths
+		opts.GradeName, opts.MotionName = choices.GradeName, choices.MotionName
+		opts.BPM, opts.AutoBPM = choices.BPM, choices.AutoBPM
+		opts.GridN = choices.GridN
+		opts.Tiles = choices.Tiles
+		opts.OutputDir, opts.outputDirFrom = choices.OutputDir, outputDirSource(choices.OutputDir, flagDir)
+	}
+	apply()
 
-	fmt.Println()
-	if err := renderClip(&opts, cfg); err != nil {
+	full := func() error {
+		opts.Preview, opts.OutputFile, opts.Overwrite = false, "", false
+		fmt.Println()
+		if err := renderClip(opts, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("\nTo run this again without prompts:\n  %s\n", opts.headlessCommand())
+		return nil
+	}
+	if !choices.Preview {
+		return full()
+	}
+
+	for {
+		opts.Preview, opts.OutputFile, opts.Overwrite = true, interactive.PreviewFile, true
+		fmt.Println()
+		if err := renderClip(opts, cfg); err != nil {
+			return err
+		}
+		previewPath := opts.outputPath(time.Time{})
+		if err := openFile(previewPath); err != nil {
+			fmt.Println(warnStyle.Render("Could not open the preview: ") + err.Error())
+		}
+		fmt.Printf("\nTo run this preview again without prompts:\n  %s\n\n", opts.headlessCommand())
+
+		next, err := askNext(opts.seeded())
+		if err != nil {
+			return err
+		}
+		switch next {
+		case interactive.NextFull:
+			if err := os.Remove(previewPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("deleting the preview: %w", err)
+			}
+			return full()
+		case interactive.NextLook:
+			if err := askLook(d, choices); err != nil {
+				return err
+			}
+			opts.GradeName, opts.MotionName = choices.GradeName, choices.MotionName
+		case interactive.NextReseed:
+			opts.Seed = 0 // renderClip picks a new one
+		case interactive.NextEverything:
+			d.Previous = choices
+			if choices, err = askAll(d); err != nil {
+				return err
+			}
+			apply()
+			if !choices.Preview {
+				if err := os.Remove(previewPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return fmt.Errorf("deleting the preview: %w", err)
+				}
+				return full()
+			}
+		case interactive.NextQuit:
+			fmt.Println(labelStyle.Render("Preview kept at ") + accentStyle.Render(previewPath))
+			return nil
+		}
+	}
+}
+
+// The interactive questions; tests replace them.
+var (
+	askAll  = interactive.Run
+	askLook = interactive.RunLook
+	askNext = interactive.AfterPreview
+)
+
+// outputDirSource names where the form's output directory came from: the
+// environment variable when it is unchanged from it, otherwise the flag's
+// name (also for a directory typed in the form). A cleared field is the
+// form's own choice to write next to the input, which the variable must not
+// override.
+func outputDirSource(dir, flagDir string) string {
+	switch {
+	case dir == "":
+		return formSource
+	case flagDir == "" && dir == os.Getenv(outdir.EnvVar):
+		return outdir.EnvVar
+	default:
+		return outdir.FlagSource
+	}
+}
+
+// formSource marks an output directory left blank in the form.
+const formSource = "the form"
+
+// openFile opens path in the default app, without waiting for it. Tests
+// replace it.
+var openFile = func(path string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
+	default:
+		cmd = exec.Command("xdg-open", path)
+	}
+	if err := cmd.Start(); err != nil {
 		return err
 	}
-	fmt.Printf("\nTo run this again without prompts:\n  %s\n", opts.headlessCommand())
+	go func() { _ = cmd.Wait() }()
 	return nil
 }
 

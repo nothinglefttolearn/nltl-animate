@@ -44,7 +44,7 @@ Every layout takes one or more images. `ffmpeg.Render` has two video input kinds
 
 `internal/outdir` picks the output directory (`--output-dir`, then `NLTL_ANIMATE_OUTPUT_DIR`) and checks it before rendering. `internal/frames` decodes and cover-crops images; `internal/video` holds the shared frame rate and preview length.
 
-Zero-args invocation drops into `internal/interactive` (a `huh`-based TUI form) instead of requiring flags.
+Zero-args invocation drops into `internal/interactive` (a `huh`-based TUI form) instead of requiring flags. `runInteractive` (in `main.go`) runs the preview loop: it renders to the fixed `interactive.PreviewFile` (`renderOptions.OutputFile`, overwritten without asking), opens it, then asks `interactive.AfterPreview` for what next: the full render (deleting the preview first), the grade-and-motion page alone (`RunLook`, seed kept), a new seed, the whole form pre-filled (`Defaults.Previous`), or quit (preview kept). The form calls are package variables (`askAll`, `askLook`, `askNext`, `openFile`) so tests can drive the loop.
 
 Output is always square, `video.Size` (1080) on each side; resizing for particular players is deliberately out of scope. Output file names keep `cycle` for single with several images (`nltl_animate_cycle_…`).
 

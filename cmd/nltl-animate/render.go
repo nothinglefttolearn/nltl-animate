@@ -66,6 +66,10 @@ type renderOptions struct {
 	OutputDir  string // --output-dir; renderClip fills it from outdir.EnvVar when empty
 	ConfigPath string
 
+	// OutputFile, when set, replaces the generated output file name (the
+	// interactive preview).
+	OutputFile string
+
 	// outputDirFrom names where OutputDir came from (outdir.FlagSource or
 	// outdir.EnvVar); renderClip fills it in.
 	outputDirFrom string
@@ -282,6 +286,9 @@ func (o *renderOptions) outputPath(at time.Time) string {
 			near = o.ImagePaths[0]
 		}
 		dir = filepath.Dir(near)
+	}
+	if o.OutputFile != "" {
+		return filepath.Join(dir, o.OutputFile)
 	}
 
 	var suffix string
@@ -605,7 +612,7 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 	if err := o.confirmOverwrite(outPath); err != nil {
 		return err
 	}
-	if o.AutoBPM {
+	if o.AutoBPM && o.BPM == 0 { // a second render of the same clip keeps the first detection
 		bpm, err := detectBPM(o.AudioPath)
 		if err != nil {
 			return err
