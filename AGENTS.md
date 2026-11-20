@@ -24,7 +24,7 @@ mise run ci           # everything CI runs: fmt:check, tidy:check, mod:verify, l
 ./nltl-animate --grade muted --motion steady --bpm 138 --preview demo.wav cover.jpg
 ```
 
-CI (`.github/workflows/ci.yml`) just runs `mise run ci`, plus a cross-compile matrix.
+CI (`.github/workflows/ci.yml`) runs the tasks of `mise run ci` as separate steps (keep the two lists in sync), plus `test:integration` and a cross-compile matrix.
 
 ## Architecture
 

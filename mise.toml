@@ -52,4 +52,5 @@ run = "go mod verify"
 
 [tasks.ci]
 description = "Run every check CI runs"
+# .github/workflows/ci.yml runs these as separate steps; keep the two in sync.
 depends = ["fmt:check", "tidy:check", "mod:verify", "lint", "test", "vuln", "build"]
