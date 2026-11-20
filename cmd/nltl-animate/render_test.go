@@ -29,6 +29,23 @@ func opts(l layoutName, images ...string) renderOptions {
 	return o
 }
 
+func TestValidateDetectsBPMWithAudio(t *testing.T) {
+	o := opts(layoutSingle, "i.png")
+	if err := o.validate(); err != nil || !o.AutoBPM {
+		t.Errorf("audio without --bpm: AutoBPM = %v, err = %v; want detection", o.AutoBPM, err)
+	}
+	o = opts(layoutSingle, "i.png")
+	o.BPM = 140
+	if err := o.validate(); err != nil || o.AutoBPM {
+		t.Errorf("--bpm 140: AutoBPM = %v, err = %v; want no detection", o.AutoBPM, err)
+	}
+	o = opts(layoutSingle, "i.png")
+	o.NoAudio, o.AudioPath = true, ""
+	if err := o.validate(); err != nil || o.AutoBPM {
+		t.Errorf("--no-audio: AutoBPM = %v, err = %v; want no detection", o.AutoBPM, err)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -43,8 +60,11 @@ func TestValidate(t *testing.T) {
 		{"hold-beats with auto bpm", func(o *renderOptions) {
 			o.ImagePaths, o.HoldBeats, o.AutoBPM = []string{"a", "b"}, 1, true
 		}, ""},
-		{"hold-beats needs bpm", func(o *renderOptions) {
+		{"hold-beats with detected bpm", func(o *renderOptions) {
 			o.ImagePaths, o.HoldBeats = []string{"a", "b"}, 1
+		}, ""},
+		{"hold-beats needs bpm without audio", func(o *renderOptions) {
+			o.NoAudio, o.AudioPath, o.ImagePaths, o.HoldBeats = true, "", []string{"a", "b"}, 1
 		}, "needs --bpm"},
 		{"hold and hold-beats", func(o *renderOptions) {
 			o.ImagePaths, o.HoldBeats, o.Hold, o.BPM = []string{"a", "b"}, 1, 4, 120
@@ -59,6 +79,7 @@ func TestValidate(t *testing.T) {
 		{"train bad bg", func(o *renderOptions) { o.Layout, o.TrainBG = layoutTrain, "red" }, "--bg"},
 		{"train bad option", func(o *renderOptions) { o.Layout, o.Train.Fog = layoutTrain, 3 }, "fog"},
 		{"no audio", func(o *renderOptions) { o.NoAudio, o.AudioPath, o.BPM = true, "", 120 }, ""},
+		{"no audio without bpm", func(o *renderOptions) { o.NoAudio, o.AudioPath = true, "" }, ""},
 		{"no audio auto bpm", func(o *renderOptions) { o.NoAudio, o.AudioPath, o.AutoBPM = true, "", true }, "needs an audio track"},
 	}
 	for _, tt := range tests {
@@ -234,13 +255,17 @@ func writePNG(t *testing.T, dir, name string, c color.RGBA) string {
 // fakeFFmpeg installs ffprobe (reports a 1s duration) and ffmpeg (records
 // its args and the number of stdin bytes) and returns the files they write.
 // When ffmpeg is asked to decode audio to raw PCM it prints the file named by
-// $FAKE_PCM, or fails if that is unset.
+// $FAKE_PCM (a kick on every beat at 120 BPM if FAKE_PCM is not set), or
+// fails if FAKE_PCM is set but empty.
 func fakeFFmpeg(t *testing.T) (argsFile, stdinFile string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("fake tools are shell scripts")
 	}
 	dir := t.TempDir()
+	if _, ok := os.LookupEnv("FAKE_PCM"); !ok {
+		t.Setenv("FAKE_PCM", writeKickPCM(t, dir, 120, 20))
+	}
 	argsFile, stdinFile = filepath.Join(dir, "args"), filepath.Join(dir, "stdin")
 	tools := map[string]string{
 		"ffprobe": "echo 1.0\n",
@@ -403,11 +428,16 @@ func TestCLIAutoBPM(t *testing.T) {
 	auto, _ := runCLI(t, "--bpm", "auto", audio, red)
 	manual, _ := runCLI(t, "--bpm", "128", audio, red)
 	none, _ := runCLI(t, audio, red)
-	if argAfter(auto, "-filter_complex") == argAfter(none, "-filter_complex") {
+	other, _ := runCLI(t, "--bpm", "120", audio, red)
+	if argAfter(manual, "-filter_complex") == argAfter(other, "-filter_complex") {
 		t.Fatal("BPM does not change the filter, so this test proves nothing")
 	}
-	if a, m := argAfter(auto, "-filter_complex"), argAfter(manual, "-filter_complex"); a != m {
+	m := argAfter(manual, "-filter_complex")
+	if a := argAfter(auto, "-filter_complex"); a != m {
 		t.Errorf("--bpm auto should render as --bpm 128\nauto:   %s\nmanual: %s", a, m)
+	}
+	if n := argAfter(none, "-filter_complex"); n != m {
+		t.Errorf("no --bpm should detect the tempo and render as --bpm 128\nnone:   %s\nmanual: %s", n, m)
 	}
 }
 
@@ -415,15 +445,18 @@ func TestCLIAutoBPMFailure(t *testing.T) {
 	dir := t.TempDir()
 	audio := filepath.Join(dir, "song.wav")
 	red := writePNG(t, dir, "red.png", color.RGBA{R: 255, A: 255})
-	fakeFFmpeg(t) // FAKE_PCM unset: decoding fails
+	t.Setenv("FAKE_PCM", "") // decoding fails
+	fakeFFmpeg(t)
 
-	cmd := newRootCmd()
-	cmd.SetArgs([]string{"--bpm", "auto", audio, red})
-	cmd.SetOut(new(strings.Builder))
-	cmd.SetErr(new(strings.Builder))
-	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "BPM detection") || !strings.Contains(err.Error(), "Invalid data found") {
-		t.Errorf("err = %v", err)
+	for _, args := range [][]string{{"--bpm", "auto", audio, red}, {audio, red}} {
+		cmd := newRootCmd()
+		cmd.SetArgs(args)
+		cmd.SetOut(new(strings.Builder))
+		cmd.SetErr(new(strings.Builder))
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "BPM detection") || !strings.Contains(err.Error(), "Invalid data found") {
+			t.Errorf("%v: err = %v, want a detection error rather than an assumed tempo", args, err)
+		}
 	}
 }
 

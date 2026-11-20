@@ -64,11 +64,11 @@ track and one or more images, moving and switching them in time with the beat.
 
 With an audio file and an image, renders the image gently moving. With
 several images, switches between them at random (never the same image twice
-in a row), every beat with --bpm or as set by --hold/--hold-beats. With a
-motion that has a shade (e.g. --motion shifting), every image shown is a
-little lighter or darker than the last, so even a single image changes on
-every switch. Every run
-prints its --seed so a clip can be reproduced exactly.
+in a row), every beat or as set by --hold/--hold-beats. The tempo is
+detected from the audio unless --bpm gives it. With a motion that has a
+shade (e.g. --motion shifting), every image shown is a little lighter or
+darker than the last, so even a single image changes on every switch. Every
+run prints its --seed so a clip can be reproduced exactly.
 
 With --no-audio, every argument is an image and the clip is silent and loops
 seamlessly: it lasts one pass through the images (each shown once, in a
@@ -300,7 +300,8 @@ func motionsCmd() *cobra.Command {
 		Use:   "motions",
 		Short: "List the motions (how the picture moves with the beat) and their dial values",
 		Long: `Lists every motion with its dial values. Strengths are percentages of the
-frame, rates are in beats (at 120 BPM without --bpm):
+frame, rates are in beats (at the track's detected tempo without --bpm, or
+120 BPM for a silent loop without --bpm):
   breath  how far the frame zooms in and out, once every breath_beats
   shake   how far the frame drifts and jitters
   pulse   how much the brightness swells, once every pulse_beats

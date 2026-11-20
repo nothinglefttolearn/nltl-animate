@@ -53,11 +53,11 @@ nltl-animate --preview track.wav cover.jpg
 
 ### Keep time with the music
 
-Without a tempo, the movement assumes 120 BPM. Pass the track's tempo so the movement lands on the beat, or let the tool detect it:
+The movement lands on the beat: without `--bpm`, the tool detects the track's tempo and prints the BPM it found. Pass the tempo yourself to skip detection or override it:
 
 ```bash
+nltl-animate track.wav cover.jpg                 # detects the tempo
 nltl-animate --bpm 138 track.wav cover.jpg
-nltl-animate --bpm auto track.wav cover.jpg      # prints the BPM it found
 ```
 
 ### Choose a look

@@ -160,7 +160,12 @@ func Run(d Defaults) (*Choices, error) {
 		huh.NewGroup(
 			huh.NewInput().
 				Title("BPM").
-				Description("Tempo-synced animations — \"auto\" detects it, blank disables").
+				DescriptionFunc(func() string {
+					if audioPath == "" {
+						return "Tempo of the motion and switching — blank runs at 120"
+					}
+					return "Tempo of the motion and switching — blank detects it from the audio"
+				}, &audioPath).
 				Placeholder("e.g. 140, or auto").
 				Validate(func(s string) error {
 					if s == "auto" && audioPath == "" {

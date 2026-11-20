@@ -13,7 +13,8 @@ import (
 	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
-// AssumedBPM is the tempo the beat dials run at when the BPM is unknown.
+// AssumedBPM is the tempo the beat dials run at when there is no BPM: only a
+// silent loop without --bpm (with audio the tempo is detected instead).
 const AssumedBPM = 120
 
 // shakeBeats is how many beats one shake cycle takes. It is fixed rather than
@@ -122,7 +123,7 @@ func (m Motion) Validate() error {
 	return fmt.Errorf("motion %q:\n  - %s", m.Name, strings.Join(problems, "\n  - "))
 }
 
-// framesPerBeat at bpm, or at AssumedBPM when bpm is 0.
+// framesPerBeat at bpm, or at AssumedBPM when bpm is 0 (a silent loop).
 func framesPerBeat(bpm int) float64 {
 	if bpm <= 0 {
 		bpm = AssumedBPM
