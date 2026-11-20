@@ -7,6 +7,8 @@ Guidance for agents and contributors working in this repository.
 
 ## Writing
 
+- The README is a short getting-started page with a few examples; [docs/guide.md](docs/guide.md) is the full description of layouts, grades, motions, config, loops and output. Flag defaults live in `--help`, so don't copy flag tables into either. When behavior changes, update the guide (and the README only if a getting-started example changes). If it changes how clips look, re-render the examples with `mise run docs:examples` (it uses whatever images are in `docs/examples/images`).
+
 - American English: "color", "center", "normalize", "canceled". It matches CSS and most programming languages.
 - User-facing text (README, `--help`, error messages, descriptions of built-in grades and motions) describes what you see and hear, not ffmpeg parameter names.
 - Use the terms in `CONTEXT.md` and never the ones it lists under _Avoid_. In particular, there is no "style" (it is a **layout**) and no "preset" (it is a **grade** or a **motion**).
@@ -21,6 +23,7 @@ mise run test         # go test -race with coverage (race detector needs a C com
 mise run lint         # golangci-lint (config in .golangci.yml; includes go vet)
 mise run fmt          # gofmt + goimports
 mise run ci           # everything CI runs: fmt:check, tidy:check, mod:verify, lint, test, vuln, build
+mise run docs:examples  # re-render the GIFs in the README and docs/guide.md
 ./nltl-animate --grade muted --motion steady --bpm 138 --preview demo.wav cover.jpg
 ```
 

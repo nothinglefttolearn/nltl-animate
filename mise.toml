@@ -38,6 +38,10 @@ run = "go test -tags integration -run Integration -count=1 -v ./cmd/..."
 description = "Run benchmarks"
 run = "go test -run '^$' -bench . ./..."
 
+[tasks."docs:examples"]
+description = "Render the example GIFs in the README and docs/guide.md (needs ffmpeg)"
+run = "docs/examples/render.sh"
+
 [tasks.vuln]
 description = "Scan dependencies and stdlib for known vulnerabilities"
 run = "govulncheck ./..."
