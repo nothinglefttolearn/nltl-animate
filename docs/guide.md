@@ -72,12 +72,12 @@ nltl-animate grid --n 3 --tiles mixed --bpm 138 demo.wav frames/*.png    # a dif
 
 A fake 3D scene: copies of the image come out of the distance and pass on your left, like standing beside a track watching a train go by. Use a PNG with transparency (a logo, a cut-out) so the copies behind show through. Distant copies fade into the background color.
 
-Pass several images and the cars cycle through them in order, so a different image passes at every step. Each image keeps its own shape; their inner edges line up along the track.
+Pass several images and the cars go through them in a random order: each image once, then again in a new order, never the same image on two cars in a row. Images made in batches (where look-alikes sit next to each other in the folder) come out mixed. `--seed` fixes the order. Each image keeps its own shape; their inner edges line up along the track.
 
 ```bash
 nltl-animate train --bpm 138 demo.wav logo.png                 # one copy passes per beat
 nltl-animate train --bpm 138 --beats 0.5 --vanish 0.7 --bg '#101820' demo.wav logo.png
-nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # a, b, c, a, b, c, ... down the line
+nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # e.g. b, a, c, a, c, b, ... down the line
 ```
 
 <img src="examples/train.gif" width="240" alt="Copies of cut-out images coming out of the distance and passing on the left">
@@ -85,7 +85,7 @@ nltl-animate train --bpm 138 demo.wav a.png b.png c.png        # a, b, c, a, b, 
 The scene is shaped by:
 
 - how many copies are on the track (`--copies`) and how far apart they are (`--spacing`, in copy heights);
-- how fast they pass: beats per copy (`--beats`), or copies per second (`--speed`) in a silent loop without `--bpm`;
+- how fast they pass: beats per copy (`--beats`), or copies per second (`--speed`) without a tempo (`--bpm disable`, or a silent loop without `--bpm`);
 - where the track vanishes across the frame (`--vanish`; `0.6`–`0.75` fills more of it), how far it runs from you (`--offset`, in widths of the widest image) and how strong the perspective is (`--fov`);
 - how much distant copies fade (`--fog`) into the background color (`--bg`).
 
@@ -190,6 +190,8 @@ The config is checked when it's loaded. Unknown keys (typos), values out of rang
 
 Without `--bpm` (or with `--bpm auto`), the tempo is detected from the audio (the first 5 minutes) and printed in the summary and in the "run this again" command, so you can pin it once you know it. The tool never assumes a tempo for a track. In the interactive form, leave the BPM field blank (or type `auto`).
 
+To ignore the beat altogether, pass `--bpm disable` (in the form, type `disable`). Nothing is detected or synced: the motion runs at 120 BPM, images switch every half second (or as set by `--hold`), and the train passes `--speed` copies per second, as in a silent loop without `--bpm`.
+
 ```bash
 nltl-animate train demo.wav logo.png
 ```
@@ -202,7 +204,7 @@ With `--no-audio` there is no audio file: every argument is an image, and the ou
 
 - **Several images (single, grid):** the clip is one pass through the images. They are shuffled once (by `--seed`) and each is shown once, for `--hold`/`--hold-beats`, so playing it on repeat shows the same sequence over and over, with the loop point falling exactly on an image switch. With `--tiles mixed` there is one step per image, and every tile also changes image at the loop point.
 - **One image (single, grid):** 3 seconds, long enough for the motion's breath and shake to read as movement. With a shade, it is rounded up to whole switches.
-- **train:** as long as it takes one car per image to pass (at least 3 seconds with one image). The speed is nudged slightly so that is a whole number of frames, and the last frame leads straight back into the first.
+- **train:** as long as it takes one car per image to pass (at least 3 seconds with one image), so the loop is one pass of the shuffled order. The speed is nudged slightly so that is a whole number of frames, and the last frame leads straight back into the first.
 
 Shades repeat with the loop, so no tile or car changes brightness at the loop point. The motion's breath, shake and pulse are not matched up at the loop point; they are jumpy anyway. With no audio there is nothing to detect a tempo from: `--bpm <number>` sets the tempo of the motion and switching, and without it the motion runs at 120 BPM and images switch every half second. `--bpm auto` needs audio. `--preview` stops at 10 seconds, which cuts long loops short.
 

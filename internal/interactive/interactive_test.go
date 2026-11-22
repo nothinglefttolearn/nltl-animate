@@ -50,7 +50,7 @@ func TestOrFirst(t *testing.T) {
 }
 
 func TestValidateBPM(t *testing.T) {
-	for in, wantErr := range map[string]bool{"": false, "auto": false, "140": false, "0": true, "-3": true, "abc": true} {
+	for in, wantErr := range map[string]bool{"": false, "auto": false, "disable": false, "140": false, "0": true, "-3": true, "abc": true, "off": true} {
 		if err := validateBPM(in); (err != nil) != wantErr {
 			t.Errorf("validateBPM(%q) err = %v, wantErr %v", in, err, wantErr)
 		}
@@ -114,6 +114,46 @@ func TestValidateOutputDir(t *testing.T) {
 	for in, ok := range map[string]bool{"": true, "  ": true, dir: true, " " + dir + " ": true, file: false, filepath.Join(dir, "nope"): false} {
 		if (validateOutputDir(in) == nil) != ok {
 			t.Errorf("validateOutputDir(%q) ok = %v, want %v", in, !ok, ok)
+		}
+	}
+}
+
+func TestParseBPM(t *testing.T) {
+	tests := []struct {
+		in             string
+		hasAudio       bool
+		bpm            int
+		auto, disabled bool
+	}{
+		{"", true, 0, true, false},        // blank detects
+		{"auto", true, 0, true, false},    // still accepted
+		{"disable", true, 0, false, true}, // no tempo
+		{" 140 ", true, 140, false, false},
+		{"", false, 0, false, false}, // no audio: runs at 120
+		{"disable", false, 0, false, true},
+		{"90", false, 90, false, false},
+	}
+	for _, tt := range tests {
+		bpm, auto, disabled := parseBPM(tt.in, tt.hasAudio)
+		if bpm != tt.bpm || auto != tt.auto || disabled != tt.disabled {
+			t.Errorf("parseBPM(%q, audio=%v) = %d, auto=%v, disabled=%v; want %d, %v, %v",
+				tt.in, tt.hasAudio, bpm, auto, disabled, tt.bpm, tt.auto, tt.disabled)
+		}
+	}
+}
+
+func TestBPMFieldRoundTrips(t *testing.T) {
+	for _, c := range []struct {
+		bpm      int
+		disabled bool
+		want     string
+	}{{0, false, ""}, {140, false, "140"}, {0, true, "disable"}} {
+		got := bpmField(c.bpm, c.disabled)
+		if got != c.want {
+			t.Errorf("bpmField(%d, %v) = %q, want %q", c.bpm, c.disabled, got, c.want)
+		}
+		if bpm, _, disabled := parseBPM(got, true); bpm != c.bpm || disabled != c.disabled {
+			t.Errorf("%q reads back as %d, disabled=%v", got, bpm, disabled)
 		}
 	}
 }

@@ -44,6 +44,32 @@ func TestValidateDetectsBPMWithAudio(t *testing.T) {
 	if err := o.validate(); err != nil || o.AutoBPM {
 		t.Errorf("--no-audio: AutoBPM = %v, err = %v; want no detection", o.AutoBPM, err)
 	}
+	o = opts(layoutSingle, "i.png")
+	o.NoBPM = true
+	if err := o.validate(); err != nil || o.AutoBPM {
+		t.Errorf("--bpm disable: AutoBPM = %v, err = %v; want no detection", o.AutoBPM, err)
+	}
+	o = opts(layoutSingle, "a.png", "b.png")
+	o.NoBPM, o.HoldBeats = true, 2
+	if err := o.validate(); err == nil || !strings.Contains(err.Error(), "--hold-beats needs a tempo") {
+		t.Errorf("--bpm disable --hold-beats 2: err = %v, want a tempo error", err)
+	}
+	o.HoldBeats, o.Hold = 0, 10
+	if err := o.validate(); err != nil {
+		t.Errorf("--bpm disable --hold 10: %v", err)
+	}
+}
+
+func TestHeadlessCommandDisabledBPM(t *testing.T) {
+	o := opts(layoutSingle, "a.png")
+	o.NoBPM = true
+	if got, want := o.headlessCommand(), "nltl-animate --grade muted --motion steady --bpm disable track.wav a.png"; got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	o.NoAudio, o.AudioPath = true, ""
+	if got := o.headlessCommand(); strings.Contains(got, "--bpm") {
+		t.Errorf("a silent loop has no tempo anyway; got %s", got)
+	}
 }
 
 func TestValidate(t *testing.T) {
@@ -441,6 +467,19 @@ func TestCLIAutoBPM(t *testing.T) {
 	}
 }
 
+func TestCLIDisabledBPM(t *testing.T) {
+	dir := t.TempDir()
+	audio := filepath.Join(dir, "song.wav")
+	red := writePNG(t, dir, "red.png", color.RGBA{R: 255, A: 255})
+	t.Setenv("FAKE_PCM", "") // detection would fail: disable must not try
+
+	disabled, _ := runCLI(t, "--bpm", "disable", audio, red)
+	assumed, _ := runCLI(t, "--bpm", "120", audio, red)
+	if d, a := argAfter(disabled, "-filter_complex"), argAfter(assumed, "-filter_complex"); d != a {
+		t.Errorf("--bpm disable should move at the assumed 120 BPM\ndisabled: %s\n120:      %s", d, a)
+	}
+}
+
 func TestCLIAutoBPMFailure(t *testing.T) {
 	dir := t.TempDir()
 	audio := filepath.Join(dir, "song.wav")
@@ -468,6 +507,12 @@ func TestBPMFlag(t *testing.T) {
 	}
 	if err := f.Set("140"); err != nil || o.AutoBPM || o.BPM != 140 || f.String() != "140" {
 		t.Errorf("140: %v %+v", err, o)
+	}
+	if err := f.Set("disable"); err != nil || o.AutoBPM || !o.NoBPM || o.BPM != 0 || f.String() != "disable" {
+		t.Errorf("disable: %v %+v", err, o)
+	}
+	if err := f.Set("auto"); err != nil || o.NoBPM {
+		t.Errorf("auto after disable: %v %+v", err, o)
 	}
 	if err := f.Set("fast"); err == nil {
 		t.Error("expected an error for a non-number")
@@ -687,6 +732,24 @@ func TestHeadlessCommandShade(t *testing.T) {
 	o.MotionName, o.Shaded, o.Seed = "shifting", true, 6
 	if got, want := o.headlessCommand(), "nltl-animate train --grade muted --motion shifting --seed 6 track.wav a.png"; got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestTrainWithSeveralImagesIsSeeded(t *testing.T) {
+	o := opts(layoutTrain, "a.png")
+	if o.seeded() {
+		t.Error("a train of one image without a shade should not use the seed")
+	}
+	o = opts(layoutTrain, "a.png", "b.png", "c.png")
+	o.Seed, o.BPM = 9, 120
+	if !o.seeded() {
+		t.Fatal("a train of several images should use the seed for their order")
+	}
+	if got, want := o.headlessCommand(), "nltl-animate train --grade muted --motion steady --bpm 120 --seed 9 track.wav a.png b.png c.png"; got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	if got, want := o.layoutSummary(), "train — 24 copies of 3 images in random order, one per beat (seed 9)"; got != want {
+		t.Errorf("summary %q, want %q", got, want)
 	}
 }
 

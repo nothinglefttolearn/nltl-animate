@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"io"
 	"math"
+	"math/rand/v2"
 	"runtime"
 	"slices"
 	"sync"
@@ -38,6 +39,9 @@ type TrainOptions struct {
 
 	// Shade gives every car its own shade for its whole trip.
 	Shade motion.Shader
+
+	// Seed picks the order of several images along the train.
+	Seed uint64
 }
 
 func DefaultTrainOptions() TrainOptions {
@@ -113,8 +117,10 @@ const fadeInFraction = 0.15
 
 // Train renders copies of one or more images on a straight track to the
 // viewer's left, traveling toward and past the camera. With several images,
-// consecutive cars show them in turn (0, 1, 2, ..., 0, 1, ...), so a
-// different image passes on every step. It implements ffmpeg.FrameSource.
+// the cars go through them in passes, each image once per pass in a new
+// random order (see imageFor), so a different image passes on every step and
+// images made in batches don't line up with their look-alikes. It implements
+// ffmpeg.FrameSource.
 //
 // World space: pinhole camera at the origin looking down +z, x right, y down.
 // Each copy is a camera-facing billboard 1 unit tall and as wide as its
@@ -134,6 +140,7 @@ type Train struct {
 	velocity float64 // world units per second
 
 	shadePeriod int // cars per loop, so the shades repeat with it; 0 = no loop
+	passes      int // image passes per loop, so the orders repeat with it; 0 = no loop
 }
 
 // trainImage is one image on the train, ready to draw.
@@ -143,7 +150,7 @@ type trainImage struct {
 }
 
 // NewTrain builds a train from one or more images. Copies show the images
-// in order, cycling through them along the lineup.
+// in a random order picked by opts.Seed, every image once per pass.
 func NewTrain(imgs []image.Image, w, h int, opts TrainOptions) (*Train, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, err
@@ -195,7 +202,8 @@ func NewTrain(imgs []image.Image, w, h int, opts TrainOptions) (*Train, error) {
 		n := float64(len(imgs))
 		cycles := max(1, math.Round(loopSec*perSecond/n))
 		perSecond = cycles * n / loopSec
-		t.shadePeriod = int(cycles) * len(imgs)
+		t.passes = int(cycles)
+		t.shadePeriod = t.passes * len(imgs)
 	}
 	t.velocity = perSecond * opts.Spacing
 	return t, nil
@@ -227,17 +235,49 @@ func (t *Train) copies(sec float64) []copyState {
 			wraps++
 		}
 		// Car n of the endless train; consecutive cars have consecutive n,
-		// so they show consecutive images even across the wrap.
+		// so the image order runs on unbroken across the wrap.
 		n := k - int(wraps)*t.opts.Copies
 		frac := d / t.length // 0 = nearest, 1 = farthest
 		alpha := (1 - t.opts.Fog*frac) * clamp01((1-frac)/fadeInFraction)
 		cs[k] = copyState{
 			z: t.near + d, alpha: alpha, car: n,
-			img: posMod(n, len(t.imgs)), gain: t.opts.Shade.Gain(n, t.shadePeriod),
+			img: t.imageFor(n), gain: t.opts.Shade.Gain(n, t.shadePeriod),
 		}
 	}
 	slices.SortFunc(cs, func(a, b copyState) int { return cmp.Compare(b.z, a.z) }) // far first
 	return cs
+}
+
+// imageFor returns the image shown by car n (any integer) of the endless
+// train. The cars go through the images in passes of len(imgs) cars: each
+// pass shows every image once, in its own random order, and no image is on
+// two cars in a row, not even where one pass meets the next. In a loop the
+// passes repeat with it. The same seed always gives the same order.
+func (t *Train) imageFor(n int) int {
+	nImages := len(t.imgs)
+	pass, pos := floorDiv(n, nImages), posMod(n, nImages)
+	order := t.passOrder(pass)
+	// A pass can start with the image that ended the pass before; swap its
+	// first two cars. That never changes a pass's last car (with 3+ images),
+	// so checking against the unswapped order before is enough.
+	if nImages > 2 && pos <= 1 {
+		if before := t.passOrder(pass - 1); order[0] == before[nImages-1] {
+			order[0], order[1] = order[1], order[0]
+		}
+	}
+	return order[pos]
+}
+
+// passOrder is the shuffled image order of one pass, before imageFor's
+// repair at its start.
+func (t *Train) passOrder(pass int) []int {
+	if len(t.imgs) <= 2 {
+		pass = 0 // two images can only alternate: keep one order
+	} else if t.passes > 0 {
+		pass = posMod(pass, t.passes)
+	}
+	r := rand.New(rand.NewPCG(t.opts.Seed, uint64(int64(pass))^0x747261696e)) //nolint:gosec // visual randomness, not security
+	return r.Perm(len(t.imgs))
 }
 
 // screenRect projects a copy of the given aspect ratio at depth z to pixel
@@ -430,3 +470,6 @@ func clamp01(v float64) float64 { return math.Max(0, math.Min(1, v)) }
 
 // posMod is a mod b in [0, b).
 func posMod(a, b int) int { return ((a % b) + b) % b }
+
+// floorDiv is a / b rounded down (toward minus infinity), for b > 0.
+func floorDiv(a, b int) int { return (a - posMod(a, b)) / b }
