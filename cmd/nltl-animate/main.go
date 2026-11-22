@@ -130,6 +130,7 @@ func runInteractive(opts *renderOptions) error {
 		MotionName:    opts.MotionName,
 		BPM:           opts.BPM,
 		AutoBPM:       opts.AutoBPM,
+		NoBPM:         opts.NoBPM,
 		GridN:         opts.GridN,
 		Tiles:         opts.Tiles,
 		OutputDir:     startDir,
@@ -146,7 +147,7 @@ func runInteractive(opts *renderOptions) error {
 		opts.NoAudio = choices.AudioPath == ""
 		opts.ImagePaths = choices.ImagePaths
 		opts.GradeName, opts.MotionName = choices.GradeName, choices.MotionName
-		opts.BPM, opts.AutoBPM = choices.BPM, choices.AutoBPM
+		opts.BPM, opts.AutoBPM, opts.NoBPM = choices.BPM, choices.AutoBPM, choices.NoBPM
 		opts.GridN = choices.GridN
 		opts.Tiles = choices.Tiles
 		opts.OutputDir, opts.outputDirFrom = choices.OutputDir, outputDirSource(choices.OutputDir, flagDir)

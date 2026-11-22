@@ -60,8 +60,9 @@ type renderOptions struct {
 	ImagePaths []string // one or more
 	GradeName  string
 	MotionName string
-	BPM        int  // 0 = detect it from the audio (120 with NoAudio)
+	BPM        int  // 0 = detect it from the audio (120 with NoAudio or NoBPM)
 	AutoBPM    bool // detect BPM from the audio; BPM is filled in by renderClip
+	NoBPM      bool // --bpm disable: no tempo even with audio, so nothing follows the beat
 	Preview    bool
 	Verbose    bool
 	OutputDir  string // --output-dir; renderClip fills it from outdir.EnvVar when empty
@@ -158,12 +159,13 @@ func customHint(custom int) string {
 
 // validate checks the options that do not need any files. It fills
 // Train.BPM and Train.BG as a side effect, and turns on AutoBPM when there is
-// audio but no BPM: the tempo is never assumed for a track.
+// audio but no BPM: the tempo is never assumed for a track (unless it is
+// disabled, NoBPM, when nothing follows the beat).
 func (o *renderOptions) validate() error {
 	if o.BPM < 0 {
 		return fmt.Errorf("--bpm must be positive, got %d", o.BPM)
 	}
-	if o.BPM == 0 && !o.NoAudio {
+	if o.BPM == 0 && !o.NoAudio && !o.NoBPM {
 		o.AutoBPM = true
 	}
 	if o.NoAudio && o.AutoBPM {
@@ -178,6 +180,9 @@ func (o *renderOptions) validate() error {
 	}
 	if o.HoldBeats < 0 {
 		return fmt.Errorf("--hold-beats must be positive, got %g", o.HoldBeats)
+	}
+	if o.HoldBeats > 0 && o.NoBPM {
+		return errors.New("--hold-beats needs a tempo — use --hold, or drop --bpm disable")
 	}
 	if o.HoldBeats > 0 && o.BPM == 0 && !o.AutoBPM {
 		return errors.New("--hold-beats needs --bpm with --no-audio")
@@ -231,9 +236,9 @@ func (o *renderOptions) steps() bool {
 }
 
 // seeded reports whether the clip uses the random seed: for the image order
-// or the shades.
+// (every layout shuffles several images) or the shades.
 func (o *renderOptions) seeded() bool {
-	return o.switches() || o.Shaded
+	return len(o.ImagePaths) > 1 || o.Shaded
 }
 
 // holdFrames is how many frames each image shows: --hold-beats, then
@@ -443,7 +448,7 @@ func (o *renderOptions) videoInput(m motion.Motion, g grade.Grade) (ffmpeg.Optio
 			imgs = append(imgs, frames.ToRGBA(img))
 		}
 		train := o.Train
-		train.Shade = m.Shader(o.Seed)
+		train.Shade, train.Seed = m.Shader(o.Seed), o.Seed
 		if o.NoAudio {
 			train.LoopFrames = o.loopFrames()
 		}
@@ -505,10 +510,13 @@ func (o *renderOptions) layoutSummary() string {
 			rate = fmt.Sprintf("one every %s beats", fmtFloat(o.Train.Beats))
 		}
 		if o.Shaded {
-			rate += fmt.Sprintf(", a shade per car (seed %d)", o.Seed)
+			rate += ", a shade per car"
+		}
+		if o.seeded() {
+			rate += fmt.Sprintf(" (seed %d)", o.Seed)
 		}
 		if n := len(o.ImagePaths); n > 1 {
-			return fmt.Sprintf("train — %d copies cycling %d images, %s", o.Train.Copies, n, rate)
+			return fmt.Sprintf("train — %d copies of %d images in random order, %s", o.Train.Copies, n, rate)
 		}
 		return fmt.Sprintf("train — %d copies, %s", o.Train.Copies, rate)
 	}
@@ -540,8 +548,11 @@ func (o *renderOptions) headlessCommand() string {
 		parts = append(parts, string(o.Layout))
 	}
 	parts = append(parts, "--grade", o.GradeName, "--motion", o.MotionName)
-	if o.BPM > 0 {
+	switch {
+	case o.BPM > 0:
 		parts = append(parts, "--bpm", strconv.Itoa(o.BPM))
+	case o.NoBPM && !o.NoAudio: // without audio there is no tempo anyway
+		parts = append(parts, "--bpm", "disable")
 	}
 	if o.Preview {
 		parts = append(parts, "--preview")
@@ -671,6 +682,8 @@ func renderClip(o *renderOptions, cfg *config.Config) error {
 			bpm += labelStyle.Render(" (detected — pass --bpm <number> to override)")
 		}
 		fmt.Println(label("BPM") + valueStyle.Render(bpm))
+	} else if o.NoBPM && !o.NoAudio {
+		fmt.Println(label("BPM") + valueStyle.Render("disabled") + labelStyle.Render(" — nothing follows the beat"))
 	}
 	if o.NoAudio {
 		fmt.Println(label("Loop") + valueStyle.Render(fmt.Sprintf("%ss (%d frames), no audio",

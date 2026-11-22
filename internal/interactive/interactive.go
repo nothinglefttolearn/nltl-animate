@@ -41,6 +41,7 @@ type Choices struct {
 	MotionName string
 	BPM        int
 	AutoBPM    bool
+	NoBPM      bool // "disable": no tempo, nothing follows the beat
 	GridN      int
 	Tiles      string // grid with several images: "same" or "mixed"
 	OutputDir  string // empty: next to the audio file, or the first image
@@ -56,6 +57,7 @@ type Defaults struct {
 	MotionName    string
 	BPM           int
 	AutoBPM       bool
+	NoBPM         bool
 	GridN         int
 	Tiles         string
 	OutputDir     string // from --output-dir or outdir.EnvVar
@@ -89,16 +91,10 @@ func Run(d Defaults) (*Choices, error) {
 		gridStr    = strconv.Itoa(max(1, d.GridN))
 		gradeName  = d.GradeName
 		motionName = d.MotionName
-		bpmStr     = ""
+		bpmStr     = bpmField(d.BPM, d.NoBPM)
 		outputDir  = d.OutputDir
 		preview    = true
 	)
-	switch {
-	case d.AutoBPM:
-		bpmStr = "auto"
-	case d.BPM > 0:
-		bpmStr = strconv.Itoa(d.BPM)
-	}
 	if len(imageFiles) == 1 {
 		imagePaths = imageFiles
 	}
@@ -110,14 +106,7 @@ func Run(d Defaults) (*Choices, error) {
 		tiles, gridStr = p.Tiles, strconv.Itoa(p.GridN)
 		gradeName, motionName = p.GradeName, p.MotionName
 		outputDir, preview = p.OutputDir, p.Preview
-		switch {
-		case p.AutoBPM:
-			bpmStr = "auto"
-		case p.BPM > 0:
-			bpmStr = strconv.Itoa(p.BPM)
-		default:
-			bpmStr = ""
-		}
+		bpmStr = bpmField(p.BPM, p.NoBPM)
 	}
 	isNot := func(s string) func() bool { return func() bool { return layoutName != s } }
 
@@ -135,7 +124,7 @@ func Run(d Defaults) (*Choices, error) {
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Images").
-				Description("space to toggle, at least 1 — with several, the clip switches between them\n(train: one per car, in order)").
+				Description("space to toggle, at least 1 — with several, the clip switches between them\n(train: one per car, in random order)").
 				Options(fileOptions(imageFiles)...).
 				Validate(validateImages).
 				Value(&imagePaths),
@@ -164,11 +153,12 @@ func Run(d Defaults) (*Choices, error) {
 					if audioPath == "" {
 						return "Tempo of the motion and switching — blank runs at 120"
 					}
-					return "Tempo of the motion and switching — blank detects it from the audio"
+					return `Tempo of the motion and switching — blank detects it from the audio,
+"disable" ignores the beat`
 				}, &audioPath).
-				Placeholder("e.g. 140, or auto").
+				Placeholder("blank, a number like 140, or disable").
 				Validate(func(s string) error {
-					if s == "auto" && audioPath == "" {
+					if strings.TrimSpace(s) == "auto" && audioPath == "" {
 						return errors.New(`"auto" needs an audio file — enter a number or leave blank`)
 					}
 					return validateBPM(s)
@@ -201,10 +191,7 @@ func Run(d Defaults) (*Choices, error) {
 		return nil, err
 	}
 
-	bpm, autoBPM := 0, bpmStr == "auto"
-	if bpmStr != "" && !autoBPM {
-		bpm, _ = strconv.Atoi(bpmStr)
-	}
+	bpm, autoBPM, noBPM := parseBPM(bpmStr, audioPath != "")
 	gridN, _ := strconv.Atoi(gridStr)
 
 	return &Choices{
@@ -215,6 +202,7 @@ func Run(d Defaults) (*Choices, error) {
 		MotionName: motionName,
 		BPM:        bpm,
 		AutoBPM:    autoBPM,
+		NoBPM:      noBPM,
 		GridN:      gridN,
 		Tiles:      tiles,
 		OutputDir:  strings.TrimSpace(outputDir),
@@ -423,13 +411,36 @@ func orFirst(want string, options []string) string {
 	return options[0]
 }
 
+// parseBPM reads the BPM field. Blank (or "auto") detects the tempo when
+// there is audio to detect it from; without audio there is nothing to detect
+// and it runs at 120. "disable" ignores the beat even with audio.
+func parseBPM(s string, hasAudio bool) (bpm int, auto, disabled bool) {
+	s = strings.TrimSpace(s)
+	bpm, _ = strconv.Atoi(s) // 0 for blank, "auto" and "disable"
+	disabled = s == "disable"
+	return bpm, bpm == 0 && !disabled && hasAudio, disabled
+}
+
+// bpmField is the BPM field's starting text: blank detects the tempo (or
+// runs at 120 without audio), "disable" ignores the beat.
+func bpmField(bpm int, noBPM bool) string {
+	switch {
+	case noBPM:
+		return "disable"
+	case bpm > 0:
+		return strconv.Itoa(bpm)
+	}
+	return ""
+}
+
 func validateBPM(s string) error {
-	if s == "" || s == "auto" {
+	switch s = strings.TrimSpace(s); s {
+	case "", "auto", "disable":
 		return nil
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil || n <= 0 {
-		return errors.New(`enter a positive number, "auto", or leave blank`)
+		return errors.New(`enter a positive number, "disable", or leave blank`)
 	}
 	return nil
 }

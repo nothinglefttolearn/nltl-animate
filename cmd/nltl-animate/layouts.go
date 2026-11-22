@@ -20,7 +20,7 @@ func addRenderFlags(cmd *cobra.Command, o *renderOptions) {
 		"how the picture looks: "+strings.Join(grade.Names(), ", ")+", or custom from --config")
 	f.StringVar(&o.MotionName, "motion", o.MotionName,
 		"how the picture moves with the beat: "+strings.Join(motion.Names(), ", ")+", or custom from --config")
-	f.Var(bpmFlag{o}, "bpm", `track BPM for the motion and image switching, or "auto" (default: detected from the audio; 120 with --no-audio)`)
+	f.Var(bpmFlag{o}, "bpm", `track BPM for the motion and image switching, "auto", or "disable" to ignore the beat (default: detected from the audio; 120 with --no-audio)`)
 	f.BoolVar(&o.Preview, "preview", o.Preview, "render a short low-quality preview")
 	f.BoolVar(&o.NoAudio, "no-audio", o.NoAudio,
 		"no audio file: every argument is an image, and the silent clip loops seamlessly")
@@ -31,29 +31,38 @@ func addRenderFlags(cmd *cobra.Command, o *renderOptions) {
 	f.Uint64Var(&o.Seed, "seed", o.Seed, "with several images or a shade: random seed for the image order and shades (0 = new each run)")
 }
 
-// bpmFlag is --bpm: a whole number, or "auto" to detect it from the audio.
+// bpmFlag is --bpm: a whole number, "auto" to detect it from the audio, or
+// "disable" for no tempo: the motion runs at its own pace and nothing waits
+// for the beat.
 type bpmFlag struct{ o *renderOptions }
 
 func (f bpmFlag) String() string {
 	if f.o == nil { // pflag calls String on a zero value for the default
 		return "0"
 	}
-	if f.o.AutoBPM {
+	switch {
+	case f.o.AutoBPM:
 		return "auto"
+	case f.o.NoBPM:
+		return "disable"
 	}
 	return strconv.Itoa(f.o.BPM)
 }
 
 func (f bpmFlag) Set(s string) error {
-	if s == "auto" {
-		f.o.BPM, f.o.AutoBPM = 0, true
+	switch s {
+	case "auto":
+		f.o.BPM, f.o.AutoBPM, f.o.NoBPM = 0, true, false
+		return nil
+	case "disable":
+		f.o.BPM, f.o.AutoBPM, f.o.NoBPM = 0, false, true
 		return nil
 	}
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		return fmt.Errorf(`want a whole number or "auto", got %q`, s)
+		return fmt.Errorf(`want a whole number, "auto" or "disable", got %q`, s)
 	}
-	f.o.BPM, f.o.AutoBPM = n, false
+	f.o.BPM, f.o.AutoBPM, f.o.NoBPM = n, false, false
 	return nil
 }
 
@@ -109,7 +118,7 @@ func layoutCmd(l layoutName, use, short, long string, extra func(*cobra.Command,
 // images, or shades, over time (single and grid).
 func addSwitchFlags(cmd *cobra.Command, o *renderOptions) {
 	f := cmd.Flags()
-	f.IntVar(&o.Hold, "hold", o.Hold, "with several images or a shade: frames to show each image for (default: 1 beat, or 15 in a silent loop without --bpm)")
+	f.IntVar(&o.Hold, "hold", o.Hold, "with several images or a shade: frames to show each image for (default: 1 beat, or 15 without a tempo)")
 	f.Float64Var(&o.HoldBeats, "hold-beats", o.HoldBeats, "with several images or a shade: beats to show each image for (needs --bpm with --no-audio)")
 }
 
@@ -154,12 +163,14 @@ viewer, coming out of the distance and passing on the left. Transparent areas
 of the image (e.g. a PNG logo) show the copies behind. Distant copies fade
 into the background color.
 
-Give several images and the cars cycle through them in order, so a different
-image passes at every step. Images keep their own shapes; their inner edges
+Give several images and the cars go through them in a random order: each
+image once, then again in a new order, never the same image twice in a row
+(--seed fixes the order). Images keep their own shapes; their inner edges
 line up along the track.
 
 One copy passes every --beats beats (at the detected tempo unless --bpm is
-given); a silent loop without --bpm passes --speed copies per second instead. --vanish moves the vanishing point to the right to fill more
+given); with --bpm disable, or a silent loop without --bpm, it passes --speed
+copies per second instead. --vanish moves the vanishing point to the right to fill more
 of the frame. The motion and grade are applied over the result; a motion
 with a shade (e.g. --motion shifting) makes every car a little lighter or
 darker.
@@ -171,7 +182,7 @@ nudged slightly so the loop is a whole number of frames.`,
 			f := cmd.Flags()
 			f.IntVar(&o.Train.Copies, "copies", d.Copies, "copies on the track at once")
 			f.Float64Var(&o.Train.Spacing, "spacing", d.Spacing, "depth gap between copies, in copy heights")
-			f.Float64Var(&o.Train.Speed, "speed", d.Speed, "copies passing per second (--no-audio without --bpm)")
+			f.Float64Var(&o.Train.Speed, "speed", d.Speed, "copies passing per second (without a tempo: --bpm disable, or --no-audio without --bpm)")
 			f.Float64Var(&o.Train.Beats, "beats", d.Beats, "beats per passing copy (with audio or --bpm)")
 			f.Float64Var(&o.Train.Offset, "offset", d.Offset, "gap between the track and the viewer, in widths of the widest image")
 			f.Float64Var(&o.Train.FOV, "fov", d.FOV, "horizontal field of view in degrees")

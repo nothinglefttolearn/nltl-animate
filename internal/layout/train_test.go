@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/nothinglefttolearn/nltl-animate/internal/video"
 )
 
 func newTestTrain(t *testing.T, img image.Image, w, h int, mod func(*TrainOptions)) *Train {
@@ -101,7 +103,7 @@ func TestTrainExitsLeftBeforeWrapping(t *testing.T) {
 	}
 }
 
-func TestTrainCyclesImagesAlongTheLineup(t *testing.T) {
+func TestTrainCarsFollowTheLineup(t *testing.T) {
 	imgs := []image.Image{
 		solid(32, 32, color.RGBA{R: 255, A: 255}),
 		solid(64, 32, color.RGBA{G: 255, A: 255}),
@@ -109,7 +111,7 @@ func TestTrainCyclesImagesAlongTheLineup(t *testing.T) {
 	}
 	for _, copies := range []int{24, 7, 2} { // multiple of 3, not a multiple, fewer copies than images
 		o := DefaultTrainOptions()
-		o.Copies = copies
+		o.Copies, o.Seed = copies, 42
 		tr, err := NewTrain(imgs, 1080, 1080, o)
 		if err != nil {
 			t.Fatal(err)
@@ -117,22 +119,100 @@ func TestTrainCyclesImagesAlongTheLineup(t *testing.T) {
 		if tr.aspect != 2 {
 			t.Fatalf("track should be offset by the widest image, aspect=%v", tr.aspect)
 		}
-		prevNearest := -1
+		prevNearest := 0
 		for i := range 400 {
 			cs := tr.copies(float64(i) * 0.05)
-			// Near to far, each car shows the next image.
-			for j := len(cs) - 1; j > 0; j-- {
-				if want := (cs[j].img + 1) % 3; cs[j-1].img != want {
-					t.Fatalf("copies=%d t=%v: car behind image %d shows %d, want %d",
-						copies, float64(i)*0.05, cs[j].img, cs[j-1].img, want)
+			for j := len(cs) - 1; j >= 0; j-- {
+				if want := tr.imageFor(cs[j].car); cs[j].img != want {
+					t.Fatalf("copies=%d: car %d shows image %d, want %d", copies, cs[j].car, cs[j].img, want)
+				}
+				// Near to far, each copy is the next car.
+				if j > 0 && cs[j-1].car != cs[j].car+1 {
+					t.Fatalf("copies=%d: car behind car %d is %d", copies, cs[j].car, cs[j-1].car)
 				}
 			}
-			// When the nearest car wraps away, the next image takes its place.
-			nearest := cs[len(cs)-1].img
-			if prevNearest >= 0 && nearest != prevNearest && nearest != (prevNearest+1)%3 {
-				t.Fatalf("copies=%d: nearest jumped from image %d to %d", copies, prevNearest, nearest)
+			// When the nearest car wraps away, the next car takes its place.
+			nearest := cs[len(cs)-1].car
+			if i > 0 && nearest != prevNearest && nearest != prevNearest+1 {
+				t.Fatalf("copies=%d: nearest jumped from car %d to %d", copies, prevNearest, nearest)
 			}
 			prevNearest = nearest
+		}
+	}
+}
+
+// trainOrder returns the images of cars from..to-1.
+func trainOrder(t *testing.T, nImages int, seed uint64, loopFrames, from, to int) []int {
+	t.Helper()
+	imgs := make([]image.Image, nImages)
+	for i := range imgs {
+		imgs[i] = solid(8, 8, color.RGBA{R: uint8(i), A: 255})
+	}
+	o := DefaultTrainOptions()
+	o.Seed, o.LoopFrames = seed, loopFrames
+	tr, err := NewTrain(imgs, 64, 64, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := make([]int, 0, to-from)
+	for n := from; n < to; n++ {
+		order = append(order, tr.imageFor(n))
+	}
+	return order
+}
+
+func TestTrainShufflesImagesInPasses(t *testing.T) {
+	for _, nImages := range []int{1, 2, 3, 4, 10} {
+		for seed := range uint64(20) {
+			order := trainOrder(t, nImages, seed, 0, -10*nImages, 10*nImages)
+			for i := 0; i < len(order); i += nImages {
+				pass := slices.Sorted(slices.Values(order[i : i+nImages]))
+				for img, got := range pass {
+					if got != img {
+						t.Fatalf("%d images, seed %d: pass %v doesn't show each image once", nImages, seed, order[i:i+nImages])
+					}
+				}
+			}
+			for i := 1; i < len(order) && nImages > 1; i++ {
+				if order[i] == order[i-1] {
+					t.Fatalf("%d images, seed %d: image %d on two cars in a row at %d: %v", nImages, seed, order[i], i, order)
+				}
+			}
+		}
+	}
+}
+
+func TestTrainOrderIsRandomButReproducible(t *testing.T) {
+	a := trainOrder(t, 10, 1, 0, 0, 50)
+	if !slices.Equal(a, trainOrder(t, 10, 1, 0, 0, 50)) {
+		t.Error("the same seed gave a different order")
+	}
+	if slices.Equal(a, trainOrder(t, 10, 2, 0, 0, 50)) {
+		t.Error("another seed gave the same order")
+	}
+	if slices.Equal(a[:10], []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}) {
+		t.Error("the first pass is in input order")
+	}
+	if slices.Equal(a[:10], a[10:20]) && slices.Equal(a[10:20], a[20:30]) {
+		t.Error("every pass has the same order: passes should be shuffled anew")
+	}
+}
+
+func TestTrainOrderRepeatsWithTheLoop(t *testing.T) {
+	o := DefaultTrainOptions()
+	for _, nImages := range []int{3, 5} {
+		for _, minFrames := range []int{0, 400} { // one pass, several passes
+			loop := TrainLoopFrames(o, nImages, minFrames)
+			cars := int(math.Round(float64(loop) / video.FPS * o.PassesPerSecond()))
+			order := trainOrder(t, nImages, 7, loop, -cars, 2*cars)
+			if !slices.Equal(order[:cars], order[cars:2*cars]) || !slices.Equal(order[:cars], order[2*cars:]) {
+				t.Errorf("%d images, %d frames: the order doesn't repeat every %d cars: %v", nImages, loop, cars, order)
+			}
+			for i := 1; i < len(order); i++ {
+				if order[i] == order[i-1] {
+					t.Errorf("%d images, %d frames: image %d twice in a row at the loop point: %v", nImages, loop, order[i], order)
+				}
+			}
 		}
 	}
 }
